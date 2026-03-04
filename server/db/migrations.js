@@ -1,0 +1,137 @@
+import { hashPassword } from '../services/authService.js'
+import { seedStarterPortfolio } from './seedData.js'
+
+const SYSTEM_USERNAME = '__seed__'
+const SYSTEM_PASSWORD = 'seed-account-disabled'
+
+export const schema = `
+  CREATE TABLE IF NOT EXISTS users (
+    id SERIAL PRIMARY KEY,
+    username VARCHAR(50) NOT NULL UNIQUE,
+    email VARCHAR(120) UNIQUE,
+    password_hash TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
+  CREATE TABLE IF NOT EXISTS assets (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    name VARCHAR(100) NOT NULL,
+    category VARCHAR(20) NOT NULL,
+    ticker VARCHAR(20),
+    value NUMERIC(15,2) NOT NULL,
+    cost NUMERIC(15,2) NOT NULL,
+    quantity NUMERIC(20,8),
+    date DATE NOT NULL,
+    institution VARCHAR(100),
+    details JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+  );
+
+  CREATE TABLE IF NOT EXISTS price_cache (
+    symbol VARCHAR(20) PRIMARY KEY,
+    price_usd NUMERIC(20,8),
+    price_sgd NUMERIC(20,8),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+  );
+
+  CREATE TABLE IF NOT EXISTS net_worth_snapshots (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    value NUMERIC(15,2) NOT NULL,
+    snapshot_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    source VARCHAR(40) NOT NULL DEFAULT 'seed',
+    created_at TIMESTAMPTZ DEFAULT NOW()
+  );
+
+  ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS email VARCHAR(120);
+
+  ALTER TABLE assets
+    ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
+
+  ALTER TABLE assets
+    ADD COLUMN IF NOT EXISTS details JSONB NOT NULL DEFAULT '{}'::jsonb;
+
+  ALTER TABLE net_worth_snapshots
+    ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
+
+  ALTER TABLE net_worth_snapshots
+    ADD COLUMN IF NOT EXISTS source VARCHAR(40) NOT NULL DEFAULT 'seed';
+
+  CREATE INDEX IF NOT EXISTS idx_users_username ON users (username);
+  CREATE INDEX IF NOT EXISTS idx_users_email ON users (email);
+  CREATE INDEX IF NOT EXISTS idx_assets_user_category_name ON assets (user_id, category, name);
+  CREATE INDEX IF NOT EXISTS idx_assets_user_value_desc ON assets (user_id, value DESC, name);
+  CREATE INDEX IF NOT EXISTS idx_assets_user_cost_desc ON assets (user_id, cost DESC, name);
+  CREATE INDEX IF NOT EXISTS idx_assets_user_date_desc ON assets (user_id, date DESC);
+  CREATE INDEX IF NOT EXISTS idx_assets_user_ticker ON assets (user_id, ticker);
+  CREATE INDEX IF NOT EXISTS idx_assets_user_name_lower ON assets (user_id, LOWER(name));
+  CREATE INDEX IF NOT EXISTS idx_assets_user_institution_lower ON assets (user_id, LOWER(institution));
+  CREATE INDEX IF NOT EXISTS idx_snapshots_user_date_created ON net_worth_snapshots (user_id, snapshot_date ASC, created_at ASC);
+  CREATE INDEX IF NOT EXISTS idx_price_cache_updated_at ON price_cache (updated_at DESC);
+`
+
+export async function ensureSystemSeedUser(client) {
+  const { rows: existing } = await client.query(
+    'SELECT id FROM users WHERE username = $1',
+    [SYSTEM_USERNAME]
+  )
+
+  if (existing.length) {
+    return existing[0].id
+  }
+
+  const passwordHash = await hashPassword(SYSTEM_PASSWORD)
+  const { rows } = await client.query(
+    `INSERT INTO users (username, password_hash)
+     VALUES ($1, $2)
+     RETURNING id`,
+    [SYSTEM_USERNAME, passwordHash]
+  )
+
+  return rows[0].id
+}
+
+export async function backfillLegacyPortfolio(client, systemUserId) {
+  await client.query(
+    `UPDATE assets
+     SET user_id = $1
+     WHERE user_id IS NULL`,
+    [systemUserId]
+  )
+
+  await client.query(
+    `UPDATE net_worth_snapshots
+     SET user_id = $1
+     WHERE user_id IS NULL`,
+    [systemUserId]
+  )
+}
+
+export async function ensureStarterPortfolio(client, userId) {
+  const { rows } = await client.query(
+    'SELECT COUNT(*)::int AS count FROM assets WHERE user_id = $1',
+    [userId]
+  )
+
+  if (rows[0]?.count > 0) {
+    return false
+  }
+
+  await seedStarterPortfolio(client, userId)
+  return true
+}
+
+export async function runMigrations(client) {
+  await client.query(schema)
+
+  const systemUserId = await ensureSystemSeedUser(client)
+  await backfillLegacyPortfolio(client, systemUserId)
+  const seeded = await ensureStarterPortfolio(client, systemUserId)
+
+  return {
+    systemUserId,
+    seeded,
+  }
+}

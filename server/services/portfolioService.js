@@ -4,33 +4,39 @@ function round(value, digits = 2) {
   return Number(Number(value || 0).toFixed(digits))
 }
 
-export async function recordNetWorthSnapshot(source = 'system', client = pool) {
+export async function recordNetWorthSnapshot(userId, source = 'system', client = pool) {
   const { rows } = await client.query(
-    'SELECT COALESCE(SUM(value), 0) AS total_value FROM assets'
+    'SELECT COALESCE(SUM(value), 0) AS total_value FROM assets WHERE user_id = $1',
+    [userId]
   )
   const totalValue = round(rows[0]?.total_value || 0)
 
   const insertResult = await client.query(
-    `INSERT INTO net_worth_snapshots (value, snapshot_date, source)
-     VALUES ($1, CURRENT_DATE, $2)
-     RETURNING id, value, snapshot_date, source, created_at`,
-    [totalValue, source]
+    `INSERT INTO net_worth_snapshots (user_id, value, snapshot_date, source)
+     VALUES ($1, $2, CURRENT_DATE, $3)
+     RETURNING id, user_id, value, snapshot_date, source, created_at`,
+    [userId, totalValue, source]
   )
 
   return insertResult.rows[0]
 }
 
-export async function getPortfolioSummary(client = pool) {
-  const { rows: assets } = await client.query('SELECT value, cost FROM assets')
+export async function getPortfolioSummary(userId, client = pool) {
+  const { rows: assets } = await client.query(
+    'SELECT value, cost FROM assets WHERE user_id = $1',
+    [userId]
+  )
   const totalValue = assets.reduce((sum, asset) => sum + Number(asset.value || 0), 0)
   const totalCost = assets.reduce((sum, asset) => sum + Number(asset.cost || 0), 0)
 
   const { rows: snapshots } = await client.query(
     `SELECT value
      FROM net_worth_snapshots
-     WHERE snapshot_date < date_trunc('month', CURRENT_DATE)::date
+     WHERE user_id = $1
+       AND snapshot_date < date_trunc('month', CURRENT_DATE)::date
      ORDER BY snapshot_date DESC, created_at DESC
-     LIMIT 1`
+     LIMIT 1`,
+    [userId]
   )
 
   const previousValue = snapshots[0] ? Number(snapshots[0].value) : totalValue
@@ -49,11 +55,13 @@ export async function getPortfolioSummary(client = pool) {
   }
 }
 
-export async function getPortfolioHistory(client = pool) {
+export async function getPortfolioHistory(userId, client = pool) {
   const { rows } = await client.query(
     `SELECT value, snapshot_date, source, created_at
      FROM net_worth_snapshots
-     ORDER BY snapshot_date ASC, created_at ASC`
+     WHERE user_id = $1
+     ORDER BY snapshot_date ASC, created_at ASC`,
+    [userId]
   )
 
   return rows.map((row) => {

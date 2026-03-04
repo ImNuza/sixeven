@@ -138,7 +138,7 @@ export default function AssetForm({
             name="name"
             value={values.name}
             onChange={updateField}
-            className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-white outline-none transition focus:border-accent/40"
+            className="app-input mt-2 text-sm"
             placeholder="Bitcoin Wallet"
           />
         </label>
@@ -149,7 +149,7 @@ export default function AssetForm({
             name="category"
             value={values.category}
             onChange={updateField}
-            className="mt-2 w-full rounded-xl border border-white/10 bg-navy-800 px-4 py-3 text-sm text-white outline-none transition focus:border-accent/40"
+            className="app-select mt-2 text-sm"
           >
             {Object.entries(ASSET_CATEGORIES).map(([key, label]) => (
               <option key={key} value={key}>
@@ -167,7 +167,7 @@ export default function AssetForm({
             name="ticker"
             value={values.ticker}
             onChange={updateField}
-            className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-white outline-none transition focus:border-accent/40"
+            className="app-input mt-2 text-sm"
             placeholder={isPricedAsset ? 'AAPL or bitcoin' : 'Optional for manual assets'}
           />
         </label>
@@ -179,7 +179,7 @@ export default function AssetForm({
             name="date"
             value={values.date}
             onChange={updateField}
-            className="mt-2 w-full rounded-xl border border-white/10 bg-navy-800 px-4 py-3 text-sm text-white outline-none transition focus:border-accent/40"
+            className="app-input mt-2 text-sm"
           />
         </label>
       </div>
@@ -196,7 +196,7 @@ export default function AssetForm({
                 name="quantity"
                 value={values.quantity}
                 onChange={updateField}
-                className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-white outline-none transition focus:border-accent/40"
+                className="app-input mt-2 text-sm"
                 placeholder="0.5"
               />
             </label>
@@ -210,7 +210,7 @@ export default function AssetForm({
                 name="cost"
                 value={values.cost}
                 onChange={updateField}
-                className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-white outline-none transition focus:border-accent/40"
+                className="app-input mt-2 text-sm"
                 placeholder="5000"
               />
             </label>
@@ -224,7 +224,7 @@ export default function AssetForm({
                 name="value"
                 value={values.value}
                 onChange={updateField}
-                className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-white outline-none transition focus:border-accent/40"
+                className="app-input mt-2 text-sm"
                 placeholder="Optional before price refresh"
               />
             </label>
@@ -235,7 +235,7 @@ export default function AssetForm({
                 name="institution"
                 value={values.institution}
                 onChange={updateField}
-                className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-white outline-none transition focus:border-accent/40"
+                className="app-input mt-2 text-sm"
                 placeholder="Broker / Wallet / Custodian"
               />
             </label>
@@ -251,7 +251,7 @@ export default function AssetForm({
                 name="value"
                 value={values.value}
                 onChange={updateField}
-                className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-white outline-none transition focus:border-accent/40"
+                className="app-input mt-2 text-sm"
                 placeholder="15000"
               />
             </label>
@@ -265,7 +265,7 @@ export default function AssetForm({
                 name="cost"
                 value={values.cost}
                 onChange={updateField}
-                className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-white outline-none transition focus:border-accent/40"
+                className="app-input mt-2 text-sm"
                 placeholder="15000"
               />
             </label>
@@ -276,7 +276,7 @@ export default function AssetForm({
                 name="institution"
                 value={values.institution}
                 onChange={updateField}
-                className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-white outline-none transition focus:border-accent/40"
+                className="app-input mt-2 text-sm"
                 placeholder="MAS / Private"
               />
             </label>
@@ -298,7 +298,7 @@ export default function AssetForm({
                     name={field.key}
                     value={values.details[field.key] || ''}
                     onChange={updateDetailField}
-                    className="mt-2 w-full rounded-xl border border-white/10 bg-navy-800 px-4 py-3 text-sm text-white outline-none transition focus:border-accent/40"
+                    className="app-select mt-2 text-sm"
                   >
                     <option value="">Select</option>
                     {field.options.map((option) => (
@@ -315,7 +315,7 @@ export default function AssetForm({
                     onChange={updateDetailField}
                     step={field.step}
                     placeholder={field.placeholder}
-                    className="mt-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-white outline-none transition focus:border-accent/40"
+                    className="app-input mt-2 text-sm"
                   />
                 )}
               </label>
@@ -339,7 +339,7 @@ export default function AssetForm({
       <button
         type="submit"
         disabled={isSubmitting}
-        className="inline-flex items-center justify-center rounded-xl bg-gradient-to-r from-accent to-blue-600 px-5 py-3 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-60"
+        className="app-button-primary inline-flex items-center justify-center px-5 py-3 text-sm disabled:cursor-not-allowed disabled:opacity-60"
       >
         {isSubmitting ? 'Saving...' : submitLabel}
       </button>

@@ -26,7 +26,8 @@ export default function AddAsset() {
     <div className="max-w-7xl mx-auto grid grid-cols-[1.5fr_0.9fr] gap-6">
       <div className="glass-card p-6">
         <div className="mb-6">
-          <h1 className="text-2xl font-bold text-white">Add New Asset</h1>
+          <p className="app-kicker">Create</p>
+          <h1 className="mt-2 text-2xl font-bold text-white">Add New Asset</h1>
           <p className="mt-1 text-sm text-white/45">
             Create a new record for a manual asset or a live-priced stock or crypto position.
           </p>
@@ -54,7 +55,7 @@ export default function AddAsset() {
         <div className="glass-card p-5">
           <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-white/40">Next</h2>
           <p className="mt-3 text-sm leading-relaxed text-white/60">
-            After saving, go to Assets and run a manual price refresh if you want the latest market values immediately.
+            After saving, SafeSeven will pick up the new position in the next automatic market sync, and the Assets page can still trigger an immediate refresh when needed.
           </p>
           <div className="mt-4 inline-flex items-center gap-2 text-sm font-medium text-accent">
             Open asset inventory

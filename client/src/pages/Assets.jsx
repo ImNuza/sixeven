@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
-import { Download, Pencil, PlusCircle, RefreshCw, Search, Trash2, Wallet } from 'lucide-react'
+import { Link, useSearchParams } from 'react-router-dom'
+import { ArrowDownUp, ChevronLeft, ChevronRight, Download, Pencil, PlusCircle, RefreshCw, Search, Trash2, Wallet } from 'lucide-react'
 import AssetForm from '../components/AssetForm'
 import { ASSET_CATEGORIES, CATEGORY_COLORS } from '../../../shared/constants.js'
-import { deleteAsset, fetchAssets, fetchPrices, refreshPrices, updateAsset } from '../services/api.js'
+import { deleteAsset, fetchAssetsPage, fetchPrices, refreshPrices, updateAsset } from '../services/api.js'
 import { summarizeAssetDetails } from '../data/assetDetails.js'
 
 function formatCurrency(value) {
@@ -15,9 +15,28 @@ function formatCurrency(value) {
   }).format(value || 0)
 }
 
+function getInitialParams(searchParams) {
+  return {
+    search: searchParams.get('search') || '',
+    category: searchParams.get('category') || 'ALL',
+    pricing: searchParams.get('pricing') || 'ALL',
+    sortBy: searchParams.get('sortBy') || 'value',
+    sortDirection: searchParams.get('sortDirection') || 'desc',
+    page: Number.parseInt(searchParams.get('page') || '1', 10) || 1,
+  }
+}
+
 export default function Assets() {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const initialParams = getInitialParams(searchParams)
   const [assets, setAssets] = useState([])
   const [prices, setPrices] = useState([])
+  const [pagination, setPagination] = useState({
+    page: 1,
+    pageSize: 6,
+    total: 0,
+    totalPages: 1,
+  })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [banner, setBanner] = useState('')
@@ -25,75 +44,132 @@ export default function Assets() {
   const [editingAsset, setEditingAsset] = useState(null)
   const [submitError, setSubmitError] = useState('')
   const [isSaving, setIsSaving] = useState(false)
-  const [search, setSearch] = useState('')
-  const [categoryFilter, setCategoryFilter] = useState('ALL')
-  const [pricingFilter, setPricingFilter] = useState('ALL')
-
-  async function loadAssets() {
-    try {
-      setLoading(true)
-      setError('')
-      const [assetRows, priceRows] = await Promise.all([fetchAssets(), fetchPrices()])
-      setAssets(assetRows)
-      setPrices(priceRows)
-    } catch (err) {
-      setError(err.message || 'Failed to load assets.')
-    } finally {
-      setLoading(false)
-    }
-  }
+  const [search, setSearch] = useState(initialParams.search)
+  const [debouncedSearch, setDebouncedSearch] = useState(initialParams.search)
+  const [categoryFilter, setCategoryFilter] = useState(initialParams.category)
+  const [pricingFilter, setPricingFilter] = useState(initialParams.pricing)
+  const [sortBy, setSortBy] = useState(initialParams.sortBy)
+  const [sortDirection, setSortDirection] = useState(initialParams.sortDirection)
+  const [page, setPage] = useState(initialParams.page)
 
   useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      setDebouncedSearch(search)
+    }, 300)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [search])
+
+  useEffect(() => {
+    const nextParams = {}
+    if (search) nextParams.search = search
+    if (categoryFilter !== 'ALL') nextParams.category = categoryFilter
+    if (pricingFilter !== 'ALL') nextParams.pricing = pricingFilter
+    if (sortBy !== 'value') nextParams.sortBy = sortBy
+    if (sortDirection !== 'desc') nextParams.sortDirection = sortDirection
+    if (page > 1) nextParams.page = String(page)
+    setSearchParams(nextParams, { replace: true })
+  }, [search, categoryFilter, pricingFilter, sortBy, sortDirection, page, setSearchParams])
+
+  useEffect(() => {
+    setPage(1)
+  }, [debouncedSearch, categoryFilter, pricingFilter])
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadAssets(showSpinner = true) {
+      try {
+        if (showSpinner) {
+          setLoading(true)
+        }
+        setError('')
+
+        const [assetResult, priceRows] = await Promise.all([
+          fetchAssetsPage({
+            page,
+            pageSize: pagination.pageSize,
+            search: debouncedSearch,
+            category: categoryFilter,
+            pricing: pricingFilter,
+            sortBy,
+            sortDirection,
+          }),
+          fetchPrices(),
+        ])
+
+        if (cancelled) {
+          return
+        }
+
+        setAssets(assetResult.items)
+        setPagination(assetResult.pagination)
+        if (assetResult.pagination.totalPages > 0 && page > assetResult.pagination.totalPages) {
+          setPage(assetResult.pagination.totalPages)
+        }
+        setPrices(priceRows)
+      } catch (err) {
+        if (!cancelled) {
+          setError(err.message || 'Failed to load assets.')
+        }
+      } finally {
+        if (!cancelled && showSpinner) {
+          setLoading(false)
+        }
+      }
+    }
+
     loadAssets()
-  }, [])
+    const intervalId = window.setInterval(() => {
+      loadAssets(false)
+    }, 60000)
 
-  const filteredAssets = useMemo(() => {
-    const term = search.trim().toLowerCase()
-
-    return assets.filter((asset) => {
-      const isLiveTracked = Boolean(asset.ticker && asset.quantity != null)
-      const matchesCategory = categoryFilter === 'ALL' || asset.category === categoryFilter
-      const matchesPricing = pricingFilter === 'ALL'
-        || (pricingFilter === 'LIVE' && isLiveTracked)
-        || (pricingFilter === 'MANUAL' && !isLiveTracked)
-      const detailSummary = summarizeAssetDetails(asset).toLowerCase()
-      const haystack = [
-        asset.name,
-        asset.ticker,
-        asset.institution,
-        ASSET_CATEGORIES[asset.category],
-        detailSummary,
-      ]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase()
-      const matchesSearch = !term || haystack.includes(term)
-
-      return matchesCategory && matchesPricing && matchesSearch
-    })
-  }, [assets, categoryFilter, pricingFilter, search])
+    return () => {
+      cancelled = true
+      window.clearInterval(intervalId)
+    }
+  }, [page, debouncedSearch, categoryFilter, pricingFilter, sortBy, sortDirection, pagination.pageSize])
 
   const stats = useMemo(() => {
-    const liveTracked = filteredAssets.filter((asset) => asset.ticker && asset.quantity != null).length
-    const totalValue = filteredAssets.reduce((sum, asset) => sum + asset.value, 0)
+    const liveTracked = assets.filter((asset) => asset.ticker && asset.quantity != null).length
+    const totalValue = assets.reduce((sum, asset) => sum + asset.value, 0)
     return {
-      count: filteredAssets.length,
+      count: pagination.total,
       liveTracked,
-      manual: filteredAssets.length - liveTracked,
+      manual: assets.length - liveTracked,
       totalValue,
     }
-  }, [filteredAssets])
+  }, [assets, pagination.total])
 
   const latestPriceTime = prices[0]?.updated_at
     ? new Date(prices[0].updated_at).toLocaleString('en-SG')
     : 'No live refresh yet'
+
+  async function reloadCurrentPage() {
+    const [assetResult, priceRows] = await Promise.all([
+      fetchAssetsPage({
+        page,
+        pageSize: pagination.pageSize,
+        search: debouncedSearch,
+        category: categoryFilter,
+        pricing: pricingFilter,
+        sortBy,
+        sortDirection,
+      }),
+      fetchPrices(),
+    ])
+
+    setAssets(assetResult.items)
+    setPagination(assetResult.pagination)
+    setPrices(priceRows)
+  }
 
   async function handleRefresh() {
     try {
       setIsRefreshing(true)
       setBanner('')
       await refreshPrices()
-      await loadAssets()
+      await reloadCurrentPage()
       setBanner('Live prices refreshed successfully.')
     } catch (err) {
       setBanner(err.message || 'Price refresh failed.')
@@ -110,7 +186,8 @@ export default function Assets() {
 
     try {
       await deleteAsset(id)
-      await loadAssets()
+      const nextPage = assets.length === 1 && page > 1 ? page - 1 : page
+      setPage(nextPage)
       setBanner('Asset deleted.')
     } catch (err) {
       setBanner(err.message || 'Delete failed.')
@@ -127,7 +204,7 @@ export default function Assets() {
       setSubmitError('')
       await updateAsset(editingAsset.id, payload)
       setEditingAsset(null)
-      await loadAssets()
+      await reloadCurrentPage()
       setBanner('Asset updated.')
     } catch (err) {
       setSubmitError(err.message || 'Update failed.')
@@ -138,7 +215,7 @@ export default function Assets() {
 
   function handleExport() {
     const headers = ['Name', 'Category', 'Ticker', 'Institution', 'Value SGD', 'Cost SGD', 'Quantity', 'Date', 'Details']
-    const rows = filteredAssets.map((asset) => [
+    const rows = assets.map((asset) => [
       asset.name,
       ASSET_CATEGORIES[asset.category] || asset.category,
       asset.ticker || '',
@@ -161,6 +238,17 @@ export default function Assets() {
     link.download = 'safeseven-assets.csv'
     link.click()
     URL.revokeObjectURL(url)
+  }
+
+  function toggleSort(nextSortBy) {
+    if (sortBy === nextSortBy) {
+      setSortDirection((current) => (current === 'asc' ? 'desc' : 'asc'))
+      return
+    }
+
+    setSortBy(nextSortBy)
+    setSortDirection(nextSortBy === 'asset' || nextSortBy === 'category' ? 'asc' : 'desc')
+    setPage(1)
   }
 
   if (loading) {
@@ -208,10 +296,10 @@ export default function Assets() {
       </div>
 
       <div className="grid grid-cols-4 gap-4">
-        <StatCard label="Assets" value={stats.count} detail="Total records" icon={Wallet} />
-        <StatCard label="Live Tracked" value={stats.liveTracked} detail="Ticker + quantity" icon={RefreshCw} />
-        <StatCard label="Manual Assets" value={stats.manual} detail="Manual valuation" icon={Pencil} />
-        <StatCard label="Portfolio Value" value={formatCurrency(stats.totalValue)} detail={`Last price sync: ${latestPriceTime}`} />
+        <StatCard label="Assets" value={stats.count} detail="Matching records" icon={Wallet} />
+        <StatCard label="Live Tracked" value={stats.liveTracked} detail="Current page" icon={RefreshCw} />
+        <StatCard label="Manual Assets" value={stats.manual} detail="Current page" icon={Pencil} />
+        <StatCard label="Portfolio Value" value={formatCurrency(stats.totalValue)} detail={`Current page • Last sync: ${latestPriceTime}`} />
       </div>
 
       <div className="glass-card p-4">
@@ -260,24 +348,24 @@ export default function Assets() {
         </div>
       </div>
 
-      {banner && (
+      {banner ? (
         <div className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-white/70">
           {banner}
         </div>
-      )}
+      ) : null}
 
       <div className="glass-card overflow-hidden">
         <div className="grid grid-cols-[2.2fr_1fr_1fr_1fr_1fr_1fr] gap-4 border-b border-white/[0.06] px-6 py-4 text-xs uppercase tracking-[0.18em] text-white/35">
-          <span>Asset</span>
-          <span>Category</span>
-          <span>Value</span>
-          <span>Cost</span>
-          <span>P&amp;L</span>
+          <SortHeader label="Asset" active={sortBy === 'asset'} direction={sortDirection} onClick={() => toggleSort('asset')} />
+          <SortHeader label="Category" active={sortBy === 'category'} direction={sortDirection} onClick={() => toggleSort('category')} />
+          <SortHeader label="Value" active={sortBy === 'value'} direction={sortDirection} onClick={() => toggleSort('value')} />
+          <SortHeader label="Cost" active={sortBy === 'cost'} direction={sortDirection} onClick={() => toggleSort('cost')} />
+          <SortHeader label="P&L" active={sortBy === 'pnl'} direction={sortDirection} onClick={() => toggleSort('pnl')} />
           <span>Actions</span>
         </div>
 
         <div className="divide-y divide-white/[0.06]">
-          {filteredAssets.map((asset) => {
+          {assets.map((asset) => {
             const gainLoss = asset.value - asset.cost
             const gainLossPct = asset.cost > 0 ? (gainLoss / asset.cost) * 100 : 0
             const detailSummary = summarizeAssetDetails(asset)
@@ -340,15 +428,47 @@ export default function Assets() {
               </div>
             )
           })}
-          {!filteredAssets.length ? (
+          {!assets.length ? (
             <div className="px-6 py-10 text-center text-sm text-white/45">
               No assets match the current search or filters.
             </div>
           ) : null}
         </div>
+
+        <div className="flex items-center justify-between border-t border-white/[0.06] px-6 py-4 text-sm text-white/50">
+          <span>
+            Showing {pagination.total === 0 ? 0 : (page - 1) * pagination.pageSize + 1}
+            {' '}-{' '}
+            {Math.min(page * pagination.pageSize, pagination.total)} of {pagination.total}
+          </span>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setPage((current) => Math.max(1, current - 1))}
+              disabled={page === 1}
+              className="inline-flex items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs text-white/70 transition hover:bg-white/[0.05] disabled:opacity-40"
+            >
+              <ChevronLeft className="h-3.5 w-3.5" />
+              Prev
+            </button>
+            <span className="px-2 text-xs uppercase tracking-[0.18em] text-white/35">
+              Page {page} / {pagination.totalPages}
+            </span>
+            <button
+              type="button"
+              onClick={() => setPage((current) => Math.min(pagination.totalPages, current + 1))}
+              disabled={page === pagination.totalPages}
+              className="inline-flex items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs text-white/70 transition hover:bg-white/[0.05] disabled:opacity-40"
+            >
+              Next
+              <ChevronRight className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
       </div>
 
-      {editingAsset && (
+      {editingAsset ? (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-navy-900/80 px-6 backdrop-blur-sm">
           <div className="glass-card w-full max-w-3xl p-6">
             <div className="mb-6 flex items-start justify-between gap-4">
@@ -376,23 +496,36 @@ export default function Assets() {
             />
           </div>
         </div>
-      )}
+      ) : null}
     </div>
+  )
+}
+
+function SortHeader({ label, active, direction, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`inline-flex items-center gap-2 text-left ${active ? 'text-white/80' : 'text-white/35'}`}
+    >
+      {label}
+      <ArrowDownUp className={`h-3.5 w-3.5 ${active && direction === 'asc' ? 'rotate-180' : ''}`} />
+    </button>
   )
 }
 
 function StatCard({ label, value, detail, icon: Icon }) {
   return (
     <div className="glass-card p-5">
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex items-center justify-between gap-4">
         <div>
-          <p className="text-xs font-medium uppercase tracking-[0.18em] text-white/35">{label}</p>
+          <p className="text-xs uppercase tracking-[0.18em] text-white/35">{label}</p>
           <p className="mt-3 text-2xl font-bold text-white">{value}</p>
           <p className="mt-2 text-xs text-white/45">{detail}</p>
         </div>
         {Icon ? (
-          <div className="rounded-xl border border-white/10 bg-white/[0.04] p-2 text-white/55">
-            <Icon className="h-4 w-4" />
+          <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-3 text-accent">
+            <Icon className="h-5 w-5" />
           </div>
         ) : null}
       </div>

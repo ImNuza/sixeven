@@ -1,7 +1,11 @@
+import { clearStoredSession, getStoredToken } from '../auth/storage.js'
+
 async function request(path, options = {}) {
+  const token = getStoredToken()
   const response = await fetch(path, {
     headers: {
       'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(options.headers || {}),
     },
     ...options,
@@ -19,6 +23,10 @@ async function request(path, options = {}) {
       // Ignore JSON parse errors and keep the default message.
     }
 
+    if (response.status === 401) {
+      clearStoredSession()
+    }
+
     throw new Error(message)
   }
 
@@ -27,6 +35,20 @@ async function request(path, options = {}) {
   }
 
   return response.json()
+}
+
+function withQuery(path, query = {}) {
+  const params = new URLSearchParams()
+
+  for (const [key, value] of Object.entries(query)) {
+    if (value == null || value === '') {
+      continue
+    }
+    params.set(key, String(value))
+  }
+
+  const search = params.toString()
+  return search ? `${path}?${search}` : path
 }
 
 function normalizeAsset(asset) {
@@ -39,9 +61,66 @@ function normalizeAsset(asset) {
   }
 }
 
+export async function registerUser(payload) {
+  return request('/api/auth/register', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function loginUser(payload) {
+  return request('/api/auth/login', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function fetchCurrentUser() {
+  return request('/api/auth/me')
+}
+
+export async function updateProfile(payload) {
+  return request('/api/auth/profile', {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function changePassword(payload) {
+  return request('/api/auth/password', {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function deleteAccount(payload) {
+  return request('/api/auth/account', {
+    method: 'DELETE',
+    body: JSON.stringify(payload),
+  })
+}
+
 export async function fetchAssets() {
-  const assets = await request('/api/assets')
+  const response = await request('/api/assets')
+  const assets = Array.isArray(response) ? response : response.items || []
   return assets.map(normalizeAsset)
+}
+
+export async function fetchAssetsPage(query = {}) {
+  const response = await request(withQuery('/api/assets', query))
+  const items = (response.items || []).map(normalizeAsset)
+
+  return {
+    items,
+    pagination: response.pagination || {
+      page: 1,
+      pageSize: items.length,
+      total: items.length,
+      totalPages: 1,
+    },
+    filters: response.filters || {},
+    sorting: response.sorting || {},
+  }
 }
 
 export async function fetchPortfolioSummary() {
@@ -50,6 +129,10 @@ export async function fetchPortfolioSummary() {
 
 export async function fetchPortfolioHistory() {
   return request('/api/portfolio/history')
+}
+
+export async function fetchInsights(query = {}) {
+  return request(withQuery('/api/insights', query))
 }
 
 export async function refreshPrices() {
