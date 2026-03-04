@@ -1,13 +1,14 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   PieChart, Pie, Cell, ResponsiveContainer, Tooltip,
   AreaChart, Area, XAxis, YAxis, CartesianGrid,
 } from 'recharts'
-import { TrendingUp, TrendingDown, AlertTriangle, CheckCircle, Info } from 'lucide-react'
-import { ASSETS, NET_WORTH_HISTORY, MOCK_INSIGHTS } from '../../../shared/mockData.js'
+import { TrendingUp, TrendingDown, AlertTriangle, CheckCircle, Info, RefreshCw } from 'lucide-react'
 import { ASSET_CATEGORIES, CATEGORY_COLORS } from '../../../shared/constants.js'
 import { calculateWellnessScore } from '../data/wellnessCalculator.js'
 import WellnessGauge from '../components/WellnessGauge'
+import { fetchAssets, fetchPortfolioHistory, fetchPortfolioSummary, fetchPrices, refreshPrices } from '../services/api.js'
+import { buildPortfolioInsights } from '../data/portfolioInsights.js'
 
 function formatCurrency(value) {
   return new Intl.NumberFormat('en-SG', {
@@ -41,16 +42,66 @@ const insightBorders = {
 }
 
 export default function Dashboard() {
-  const totalNetWorth = useMemo(() => ASSETS.reduce((sum, a) => sum + a.value, 0), [])
-  const totalCost = useMemo(() => ASSETS.reduce((sum, a) => sum + a.cost, 0), [])
-  const totalGainLoss = totalNetWorth - totalCost
-  const gainLossPercent = ((totalGainLoss / totalCost) * 100).toFixed(1)
+  const [assets, setAssets] = useState([])
+  const [summary, setSummary] = useState(null)
+  const [history, setHistory] = useState([])
+  const [prices, setPrices] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [isRefreshing, setIsRefreshing] = useState(false)
 
-  const { score, breakdown } = useMemo(() => calculateWellnessScore(ASSETS), [])
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadDashboardData() {
+      try {
+        setLoading(true)
+        setError('')
+
+        const [assetsData, summaryData, historyData, priceData] = await Promise.all([
+          fetchAssets(),
+          fetchPortfolioSummary(),
+          fetchPortfolioHistory(),
+          fetchPrices(),
+        ])
+
+        if (cancelled) {
+          return
+        }
+
+        setAssets(assetsData)
+        setSummary(summaryData)
+        setHistory(historyData)
+        setPrices(priceData)
+      } catch (err) {
+        if (!cancelled) {
+          setError(err.message || 'Failed to load dashboard data.')
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false)
+        }
+      }
+    }
+
+    loadDashboardData()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const totalNetWorth = summary?.totalNetWorth ?? 0
+  const totalCost = summary?.totalCost ?? 0
+  const totalGainLoss = summary?.totalGainLoss ?? 0
+  const gainLossPercent = totalCost > 0 ? (summary?.gainLossPct ?? 0).toFixed(1) : '0.0'
+
+  const { score, breakdown } = useMemo(() => calculateWellnessScore(assets), [assets])
+  const insights = useMemo(() => buildPortfolioInsights(assets, summary, prices), [assets, prices, summary])
 
   const pieData = useMemo(() => {
     const grouped = {}
-    ASSETS.forEach((a) => {
+    assets.forEach((a) => {
       grouped[a.category] = (grouped[a.category] || 0) + a.value
     })
     return Object.entries(grouped).map(([key, value]) => ({
@@ -58,18 +109,78 @@ export default function Dashboard() {
       value,
       key,
     }))
-  }, [])
+  }, [assets])
 
-  const previousValue = NET_WORTH_HISTORY[NET_WORTH_HISTORY.length - 2]?.value || totalNetWorth
-  const monthlyChange = totalNetWorth - previousValue
-  const monthlyChangePercent = ((monthlyChange / previousValue) * 100).toFixed(1)
+  const monthlyChange = summary?.monthlyChange ?? 0
+  const monthlyChangePercent = summary ? summary.monthlyChangePct.toFixed(1) : '0.0'
+  const latestPriceTime = prices[0]?.updated_at
+    ? new Date(prices[0].updated_at).toLocaleString('en-SG')
+    : 'No live price refresh yet'
+
+  async function handleManualRefresh() {
+    try {
+      setIsRefreshing(true)
+      setError('')
+      await refreshPrices()
+      const [assetsData, summaryData, historyData, priceData] = await Promise.all([
+        fetchAssets(),
+        fetchPortfolioSummary(),
+        fetchPortfolioHistory(),
+        fetchPrices(),
+      ])
+      setAssets(assetsData)
+      setSummary(summaryData)
+      setHistory(historyData)
+      setPrices(priceData)
+    } catch (err) {
+      setError(err.message || 'Failed to refresh live prices.')
+    } finally {
+      setIsRefreshing(false)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="max-w-7xl mx-auto">
+        <div className="glass-card p-6">
+          <p className="text-white/70 text-sm">Loading live portfolio data...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="max-w-7xl mx-auto">
+        <div className="glass-card p-6 border border-red-500/20">
+          <h1 className="text-xl font-bold text-white">Dashboard unavailable</h1>
+          <p className="text-sm text-white/60 mt-2">{error}</p>
+          <p className="text-xs text-white/40 mt-3">
+            Check that the API server is running on port 3001 and PostgreSQL is available.
+          </p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
       {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-white">Wealth Dashboard</h1>
-        <p className="text-sm text-white/40 mt-1">Overview of your total financial health</p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-white">Wealth Dashboard</h1>
+          <p className="text-sm text-white/40 mt-1">Overview of your total financial health</p>
+          <p className="text-xs text-white/30 mt-2">Latest market sync: {latestPriceTime}</p>
+        </div>
+        <button
+          type="button"
+          onClick={handleManualRefresh}
+          disabled={isRefreshing}
+          className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-medium text-white/80 transition hover:bg-white/[0.07] disabled:opacity-60"
+        >
+          <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+          {isRefreshing ? 'Refreshing...' : 'Refresh Prices'}
+        </button>
       </div>
 
       {/* Top Row: Net Worth + Wellness Score */}
@@ -138,7 +249,9 @@ export default function Dashboard() {
               <div key={entry.key} className="flex items-center gap-2 text-xs">
                 <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: CATEGORY_COLORS[entry.key] }} />
                 <span className="text-white/50 truncate">{entry.name}</span>
-                <span className="text-white/80 font-medium ml-auto">{((entry.value / totalNetWorth) * 100).toFixed(0)}%</span>
+                <span className="text-white/80 font-medium ml-auto">
+                  {totalNetWorth > 0 ? ((entry.value / totalNetWorth) * 100).toFixed(0) : '0'}%
+                </span>
               </div>
             ))}
           </div>
@@ -148,7 +261,7 @@ export default function Dashboard() {
         <div className="col-span-3 glass-card p-6">
           <p className="text-sm text-white/40 font-medium mb-4">Net Worth Over Time</p>
           <ResponsiveContainer width="100%" height={280}>
-            <AreaChart data={NET_WORTH_HISTORY}>
+            <AreaChart data={history}>
               <defs>
                 <linearGradient id="netWorthGrad" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="#3B82F6" stopOpacity={0.3} />
@@ -221,8 +334,8 @@ export default function Dashboard() {
         <div className="glass-card p-6">
           <p className="text-sm text-white/40 font-medium mb-4">Quick Insights</p>
           <div className="space-y-3">
-            {MOCK_INSIGHTS.map((insight, i) => (
-              <div key={i} className={`flex gap-3 p-3 rounded-xl bg-white/[0.02] border ${insightBorders[insight.type]}`}>
+            {insights.highlights.map((insight) => (
+              <div key={insight.title} className={`flex gap-3 p-3 rounded-xl bg-white/[0.02] border ${insightBorders[insight.type]}`}>
                 <div className="mt-0.5 flex-shrink-0">{insightIcons[insight.type]}</div>
                 <div>
                   <p className="text-sm font-medium text-white/80">{insight.title}</p>
