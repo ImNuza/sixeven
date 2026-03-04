@@ -1,0 +1,2 @@
+# sixeven
+NTU FinTech Hackathon
