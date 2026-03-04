@@ -1,5 +1,41 @@
 import { WELLNESS_THRESHOLDS } from '../../../shared/constants.js'
 
+export function getWellnessStatus(score) {
+  if (score >= 85) {
+    return {
+      label: 'Excellent',
+      tone: 'positive',
+      color: '#18a871',
+      summary: 'Balanced, resilient, and comfortably diversified.',
+    }
+  }
+
+  if (score >= 70) {
+    return {
+      label: 'Strong',
+      tone: 'positive',
+      color: '#2f7cf6',
+      summary: 'On track with only a few areas to tighten.',
+    }
+  }
+
+  if (score >= 50) {
+    return {
+      label: 'Caution',
+      tone: 'warning',
+      color: '#f0a100',
+      summary: 'Functional, but a few risks need attention soon.',
+    }
+  }
+
+  return {
+    label: 'Fragile',
+    tone: 'danger',
+    color: '#e65054',
+    summary: 'Liquidity, diversification, or risk exposure needs work.',
+  }
+}
+
 export function calculateWellnessScore(assets) {
   const total = assets.reduce((sum, a) => sum + a.value, 0)
   if (total === 0) return { score: 0, breakdown: [] }

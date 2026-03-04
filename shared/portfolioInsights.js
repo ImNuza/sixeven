@@ -54,35 +54,23 @@ export function buildPortfolioInsights(assets, summary, prices = []) {
   const highlights = [
     {
       type: largestCategoryPct > WELLNESS_THRESHOLDS.DIVERSIFICATION_MAX ? 'warning' : 'positive',
-      title: 'Concentration Risk',
-      message:
-        largestCategoryPct > WELLNESS_THRESHOLDS.DIVERSIFICATION_MAX
-          ? `${ASSET_CATEGORIES[largestCategory] || largestCategory} makes up ${round(largestCategoryPct * 100)}% of the portfolio. This is above the 40% diversification target.`
-          : `Largest category is ${ASSET_CATEGORIES[largestCategory] || largestCategory} at ${round(largestCategoryPct * 100)}%, which stays inside the diversification target.`,
+      title: largestCategoryPct > WELLNESS_THRESHOLDS.DIVERSIFICATION_MAX ? 'Concentration Risk' : 'Well Diversified',
+      message: `${ASSET_CATEGORIES[largestCategory] || largestCategory} is ${round(largestCategoryPct * 100)}% of your portfolio${largestCategoryPct > WELLNESS_THRESHOLDS.DIVERSIFICATION_MAX ? ' — trim to stay under 40%.' : '.'}`,
     },
     {
       type: liquidPct >= WELLNESS_THRESHOLDS.LIQUIDITY_TARGET ? 'positive' : 'warning',
-      title: 'Liquidity Position',
-      message:
-        liquidPct >= WELLNESS_THRESHOLDS.LIQUIDITY_TARGET
-          ? `Liquid assets account for ${round(liquidPct * 100)}% of total wealth. You are above the 20% liquidity threshold.`
-          : `Liquid assets account for ${round(liquidPct * 100)}% of total wealth. Consider raising this toward 20% for flexibility.`,
+      title: liquidPct >= WELLNESS_THRESHOLDS.LIQUIDITY_TARGET ? 'Healthy Liquidity' : 'Low Liquidity',
+      message: `${round(liquidPct * 100)}% liquid${liquidPct < WELLNESS_THRESHOLDS.LIQUIDITY_TARGET ? ' — raise to 20% for flexibility.' : ' — above the 20% threshold.'}`,
     },
     {
       type: cryptoPct > WELLNESS_THRESHOLDS.CRYPTO_MAX ? 'warning' : 'positive',
-      title: 'Crypto Exposure',
-      message:
-        cryptoPct > WELLNESS_THRESHOLDS.CRYPTO_MAX
-          ? `Crypto is ${round(cryptoPct * 100)}% of the portfolio, above the recommended 30% cap.`
-          : `Crypto is ${round(cryptoPct * 100)}% of the portfolio, within the preferred risk range.`,
+      title: cryptoPct > WELLNESS_THRESHOLDS.CRYPTO_MAX ? 'High Crypto Risk' : 'Crypto in Range',
+      message: `${round(cryptoPct * 100)}% in crypto${cryptoPct > WELLNESS_THRESHOLDS.CRYPTO_MAX ? ' — recommended cap is 30%.' : ' — within the preferred range.'}`,
     },
     {
       type: cashMonths >= WELLNESS_THRESHOLDS.EMERGENCY_FUND_MONTHS ? 'positive' : 'info',
-      title: 'Emergency Fund Coverage',
-      message:
-        cashMonths >= WELLNESS_THRESHOLDS.EMERGENCY_FUND_MONTHS
-          ? `Cash reserves cover about ${round(cashMonths)} months of expenses, which meets the six-month target.`
-          : `Cash reserves cover about ${round(cashMonths)} months of expenses. Building toward six months would improve resilience.`,
+      title: cashMonths >= WELLNESS_THRESHOLDS.EMERGENCY_FUND_MONTHS ? 'Emergency Fund OK' : 'Build Emergency Fund',
+      message: `${round(cashMonths)} months of expenses covered${cashMonths < WELLNESS_THRESHOLDS.EMERGENCY_FUND_MONTHS ? ` — target is ${WELLNESS_THRESHOLDS.EMERGENCY_FUND_MONTHS} months.` : '.'}`,
     },
   ]
 

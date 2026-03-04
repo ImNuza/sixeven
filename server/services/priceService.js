@@ -107,14 +107,20 @@ async function refreshUserPricesInternal(userId, snapshotSource = 'price_refresh
       try {
         let priceNative = null
 
+        // Yahoo Finance first — unlimited, no API key needed
         try {
-          priceNative = await getStockPriceAlphaVantage(asset.ticker)
+          priceNative = await getStockPriceYahoo(asset.ticker)
         } catch {
           priceNative = null
         }
 
-        if (!priceNative) {
-          priceNative = await getStockPriceYahoo(asset.ticker)
+        // Alpha Vantage as fallback only (25 req/day free tier — use sparingly)
+        if (!priceNative && ALPHA_VANTAGE_KEY) {
+          try {
+            priceNative = await getStockPriceAlphaVantage(asset.ticker)
+          } catch {
+            priceNative = null
+          }
         }
 
         if (!priceNative) {

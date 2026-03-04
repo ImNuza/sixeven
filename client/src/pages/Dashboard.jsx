@@ -3,12 +3,22 @@ import {
   PieChart, Pie, Cell, ResponsiveContainer, Tooltip,
   AreaChart, Area, XAxis, YAxis, CartesianGrid,
 } from 'recharts'
-import { TrendingUp, TrendingDown, AlertTriangle, CheckCircle, Info, RefreshCw, ShieldCheck } from 'lucide-react'
+import {
+  AlertTriangle, CheckCircle,
+  Info, RefreshCw, ShieldCheck, Clock, ArrowUpRight, ArrowDownRight,
+} from 'lucide-react'
 import { ASSET_CATEGORIES, CATEGORY_COLORS } from '../../../shared/constants.js'
 import { calculateWellnessScore, getWellnessStatus } from '../data/wellnessCalculator.js'
-import WellnessGauge from '../components/WellnessGauge'
 import { fetchAssets, fetchPortfolioHistory, fetchPortfolioSummary, fetchPrices, refreshPrices } from '../services/api.js'
 import { buildPortfolioInsights } from '../data/portfolioInsights.js'
+
+const TIME_RANGES = [
+  { label: '1M', months: 1 },
+  { label: '3M', months: 3 },
+  { label: '6M', months: 6 },
+  { label: '1Y', months: 12 },
+  { label: 'ALL', months: Infinity },
+]
 
 function formatCurrency(value) {
   return new Intl.NumberFormat('en-SG', {
@@ -19,26 +29,30 @@ function formatCurrency(value) {
   }).format(value)
 }
 
-const CustomTooltip = ({ active, payload }) => {
+function formatChange(value) {
+  return `${value >= 0 ? '+' : ''}${formatCurrency(value)}`
+}
+
+const ChartTooltip = ({ active, payload }) => {
   if (!active || !payload?.length) return null
   return (
     <div className="glass-card px-4 py-3 text-sm">
-      <p className="text-white/60 text-xs">{payload[0]?.payload?.name || payload[0]?.payload?.month}</p>
+      <p className="text-white/50 text-xs mb-1">{payload[0]?.payload?.name || payload[0]?.payload?.month}</p>
       <p className="text-white font-semibold">{formatCurrency(payload[0].value)}</p>
     </div>
   )
 }
 
 const insightIcons = {
-  warning: <AlertTriangle className="h-4 w-4 text-warning" />,
-  positive: <CheckCircle className="h-4 w-4 text-positive" />,
-  info: <Info className="h-4 w-4 text-accent" />,
+  warning: <AlertTriangle className="h-4 w-4 text-yellow-400" />,
+  positive: <CheckCircle className="h-4 w-4 text-emerald-400" />,
+  info: <Info className="h-4 w-4 text-blue-400" />,
 }
 
-const insightBorders = {
-  warning: 'border-warning/20',
-  positive: 'border-positive/20',
-  info: 'border-accent/20',
+const insightBg = {
+  warning: 'border-yellow-400/15 bg-yellow-400/[0.04]',
+  positive: 'border-emerald-400/15 bg-emerald-400/[0.04]',
+  info: 'border-blue-400/15 bg-blue-400/[0.04]',
 }
 
 export default function Dashboard() {
@@ -49,101 +63,80 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [isRefreshing, setIsRefreshing] = useState(false)
+  const [activeRange, setActiveRange] = useState('ALL')
 
   useEffect(() => {
     let cancelled = false
 
-    async function loadDashboardData(showSpinner = true) {
+    async function load(showSpinner = true) {
       try {
-        if (showSpinner) {
-          setLoading(true)
-        }
+        if (showSpinner) setLoading(true)
         setError('')
-
-        const [assetsData, summaryData, historyData, priceData] = await Promise.all([
-          fetchAssets(),
-          fetchPortfolioSummary(),
-          fetchPortfolioHistory(),
-          fetchPrices(),
+        const [a, s, h, p] = await Promise.all([
+          fetchAssets(), fetchPortfolioSummary(), fetchPortfolioHistory(), fetchPrices(),
         ])
-
-        if (cancelled) {
-          return
-        }
-
-        setAssets(assetsData)
-        setSummary(summaryData)
-        setHistory(historyData)
-        setPrices(priceData)
+        if (cancelled) return
+        setAssets(a); setSummary(s); setHistory(h); setPrices(p)
       } catch (err) {
-        if (!cancelled) {
-          setError(err.message || 'Failed to load dashboard data.')
-        }
+        if (!cancelled) setError(err.message || 'Failed to load dashboard data.')
       } finally {
-        if (!cancelled && showSpinner) {
-          setLoading(false)
-        }
+        if (!cancelled && showSpinner) setLoading(false)
       }
     }
 
-    loadDashboardData()
-    const intervalId = window.setInterval(() => {
-      loadDashboardData(false)
-    }, 60000)
-
-    return () => {
-      cancelled = true
-      window.clearInterval(intervalId)
-    }
+    load()
+    const id = window.setInterval(() => load(false), 60000)
+    return () => { cancelled = true; window.clearInterval(id) }
   }, [])
 
-  const totalNetWorth = summary?.totalNetWorth ?? 0
-  const totalCost = summary?.totalCost ?? 0
-  const totalGainLoss = summary?.totalGainLoss ?? 0
-  const gainLossPercent = totalCost > 0 ? (summary?.gainLossPct ?? 0).toFixed(1) : '0.0'
   const { score, breakdown } = useMemo(() => calculateWellnessScore(assets), [assets])
   const healthStatus = useMemo(() => getWellnessStatus(score), [score])
   const insights = useMemo(() => buildPortfolioInsights(assets, summary, prices), [assets, prices, summary])
 
   const pieData = useMemo(() => {
     const grouped = {}
-    assets.forEach((asset) => {
-      grouped[asset.category] = (grouped[asset.category] || 0) + asset.value
-    })
-    return Object.entries(grouped).map(([key, value]) => ({
-      name: ASSET_CATEGORIES[key],
-      value,
-      key,
-    }))
+    assets.forEach((a) => { grouped[a.category] = (grouped[a.category] || 0) + a.value })
+    return Object.entries(grouped)
+      .map(([key, value]) => ({ name: ASSET_CATEGORIES[key], value, key }))
+      .sort((a, b) => b.value - a.value)
   }, [assets])
 
-  const monthlyChange = summary?.monthlyChange ?? 0
-  const monthlyChangePercent = summary ? summary.monthlyChangePct.toFixed(1) : '0.0'
-  const latestPriceTime = prices[0]?.updated_at
-    ? new Date(prices[0].updated_at).toLocaleString('en-SG')
-    : 'No live price refresh yet'
+  const filteredHistory = useMemo(() => {
+    const range = TIME_RANGES.find((r) => r.label === activeRange)
+    if (!range || range.months === Infinity) return history
+    return history.slice(-range.months)
+  }, [history, activeRange])
 
-  async function reloadAll() {
-    const [assetsData, summaryData, historyData, priceData] = await Promise.all([
-      fetchAssets(),
-      fetchPortfolioSummary(),
-      fetchPortfolioHistory(),
-      fetchPrices(),
-    ])
-    setAssets(assetsData)
-    setSummary(summaryData)
-    setHistory(historyData)
-    setPrices(priceData)
-  }
+  const topHoldings = useMemo(() => {
+    return [...assets]
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 5)
+      .map((a) => ({
+        ...a,
+        gain: a.value - a.cost,
+        gainPct: a.cost > 0 ? ((a.value - a.cost) / a.cost) * 100 : 0,
+      }))
+  }, [assets])
+
+  const totalNetWorth = summary?.totalNetWorth ?? 0
+  const totalCost = summary?.totalCost ?? 0
+  const totalGainLoss = summary?.totalGainLoss ?? 0
+  const gainLossPct = totalCost > 0 ? (summary?.gainLossPct ?? 0).toFixed(1) : '0.0'
+  const monthlyChange = summary?.monthlyChange ?? 0
+  const monthlyChangePct = summary ? summary.monthlyChangePct.toFixed(1) : '0.0'
+  const lastSync = prices[0]?.updated_at
+    ? new Date(prices[0].updated_at).toLocaleString('en-SG', { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' })
+    : null
 
   async function handleManualRefresh() {
     try {
       setIsRefreshing(true)
       setError('')
       await refreshPrices()
-      await reloadAll()
+      const [a, s, h, p] = await Promise.all([fetchAssets(), fetchPortfolioSummary(), fetchPortfolioHistory(), fetchPrices()])
+      setAssets(a); setSummary(s); setHistory(h); setPrices(p)
     } catch (err) {
-      setError(err.message || 'Failed to refresh live prices.')
+      setError(err.message || 'Failed to refresh prices.')
     } finally {
       setIsRefreshing(false)
     }
@@ -151,9 +144,10 @@ export default function Dashboard() {
 
   if (loading) {
     return (
-      <div className="mx-auto max-w-7xl">
-        <div className="glass-card p-6">
-          <p className="text-sm text-white/70">Loading live portfolio data...</p>
+      <div className="max-w-7xl mx-auto">
+        <div className="glass-card p-8 flex items-center gap-3">
+          <RefreshCw className="h-4 w-4 animate-spin text-blue-400" />
+          <p className="text-sm text-white/60">Loading portfolio data...</p>
         </div>
       </div>
     )
@@ -161,263 +155,315 @@ export default function Dashboard() {
 
   if (error) {
     return (
-      <div className="mx-auto max-w-7xl">
-        <div className="glass-card border border-red-500/20 p-6">
-          <h1 className="text-xl font-bold text-white">Dashboard unavailable</h1>
-          <p className="mt-2 text-sm text-white/60">{error}</p>
-          <p className="mt-3 text-xs text-white/40">
-            Check that the API server is running on port 3001 and PostgreSQL is available.
-          </p>
+      <div className="max-w-7xl mx-auto">
+        <div className="glass-card p-8 border border-red-500/20">
+          <h2 className="text-white font-semibold">Dashboard unavailable</h2>
+          <p className="mt-2 text-sm text-white/50">{error}</p>
+          <p className="mt-3 text-xs text-white/30">Make sure the API server is running on port 3001 and PostgreSQL is available.</p>
         </div>
       </div>
     )
   }
 
   return (
-    <div className="mx-auto max-w-7xl space-y-6">
-      <div className="flex items-start justify-between gap-4">
+    <div className="max-w-7xl mx-auto space-y-5">
+
+      {/* ── Page Header ───────────────────────────────────────── */}
+      <div className="flex items-center justify-between">
         <div>
-          <p className="app-kicker">Overview</p>
-          <h1 className="mt-2 text-3xl font-semibold text-white">Wealth Dashboard</h1>
-          <p className="mt-2 text-sm text-white/40">A single health check on your portfolio, liquidity, and risk posture.</p>
-          <p className="mt-3 text-xs text-white/30">Latest market sync: {latestPriceTime}</p>
+          <h1 className="text-2xl font-semibold text-white">Wealth Dashboard</h1>
+          <div className="flex items-center gap-2 mt-1">
+            <Clock className="h-3.5 w-3.5 text-white/30" />
+            <p className="text-xs text-white/30">
+              {lastSync ? `Last synced ${lastSync}` : 'Prices not yet synced'}
+            </p>
+          </div>
         </div>
         <button
           type="button"
           onClick={handleManualRefresh}
           disabled={isRefreshing}
-          className="app-button-secondary inline-flex items-center gap-2 px-4 py-3 text-sm disabled:opacity-60"
+          className="app-button-secondary inline-flex items-center gap-2 px-4 py-2.5 text-sm disabled:opacity-50"
         >
-          <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
-          {isRefreshing ? 'Refreshing...' : 'Refresh Prices'}
+          <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
+          {isRefreshing ? 'Refreshing…' : 'Refresh Prices'}
         </button>
       </div>
 
-      <div className="grid grid-cols-[1.45fr_0.9fr] gap-6">
-        <div className="glass-card glow-blue p-8">
-          <div className="flex items-start justify-between gap-6">
-            <div>
-              <p className="app-kicker">Net worth</p>
-              <h2 className="gradient-text mt-4 text-5xl font-semibold tracking-tight">
-                {formatCurrency(totalNetWorth)}
-              </h2>
-              <div className="mt-5 flex flex-wrap items-center gap-6">
-                <div className="flex items-center gap-2">
-                  {monthlyChange >= 0 ? (
-                    <TrendingUp className="h-4 w-4 text-positive" />
-                  ) : (
-                    <TrendingDown className="h-4 w-4 text-negative" />
-                  )}
-                  <span className={`text-sm font-semibold ${monthlyChange >= 0 ? 'text-positive' : 'text-negative'}`}>
-                    {monthlyChange >= 0 ? '+' : ''}{formatCurrency(monthlyChange)} ({monthlyChangePercent}%)
-                  </span>
-                  <span className="text-xs text-white/30">this month</span>
-                </div>
-                <div className="h-4 w-px bg-white/10" />
-                <div className="flex items-center gap-2">
-                  <span className={`text-sm font-semibold ${totalGainLoss >= 0 ? 'text-positive' : 'text-negative'}`}>
-                    {totalGainLoss >= 0 ? '+' : ''}{formatCurrency(totalGainLoss)} ({gainLossPercent}%)
-                  </span>
-                  <span className="text-xs text-white/30">total P&amp;L</span>
-                </div>
-              </div>
-            </div>
-
-            <div
-              className="min-w-[220px] rounded-[28px] border px-5 py-5"
-              style={{
-                borderColor: `${healthStatus.color}33`,
-                backgroundColor: `${healthStatus.color}10`,
-              }}
-            >
-              <div className="flex items-center gap-2">
-                <ShieldCheck className="h-4 w-4" style={{ color: healthStatus.color }} />
-                <span className="text-xs font-semibold uppercase tracking-[0.18em]" style={{ color: healthStatus.color }}>
-                  Financial Health
-                </span>
-              </div>
-              <div className="mt-5 flex items-end gap-3">
-                <span className="text-5xl font-semibold" style={{ color: healthStatus.color }}>{score}</span>
-                <span className="pb-2 text-sm text-white/45">/100</span>
-              </div>
-              <div className="app-health-badge mt-3" style={{ color: healthStatus.color, backgroundColor: `${healthStatus.color}14` }}>
-                {healthStatus.label}
-              </div>
-              <p className="mt-3 text-sm leading-relaxed text-white/55">{healthStatus.summary}</p>
-            </div>
-          </div>
-        </div>
-
-        <div className="glass-card p-6">
-          <p className="app-kicker">Score dial</p>
-          <div className="mt-5 flex flex-col items-center justify-center">
-            <WellnessGauge score={score} />
-            <p className="mt-4 text-center text-sm text-white/50">
-              Investors can use this score as a quick read on diversification, liquidity, and emergency readiness.
-            </p>
-          </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-4 gap-4">
-        <MetricCard label="Financial Health" value={`${score}/100`} detail={healthStatus.label} tone={healthStatus.color} />
-        <MetricCard label="Net Worth" value={formatCurrency(totalNetWorth)} detail="Current balance sheet" />
-        <MetricCard
-          label="Monthly Move"
-          value={`${monthlyChange >= 0 ? '+' : ''}${formatCurrency(monthlyChange)}`}
-          detail={`${monthlyChangePercent}% vs prior month`}
-          tone={monthlyChange >= 0 ? '#18a871' : '#e65054'}
+      {/* ── Row 1: 4 KPI Cards ────────────────────────────────── */}
+      <div className="grid grid-cols-4 gap-5">
+        <KpiCard
+          label="Total Net Worth"
+          value={formatCurrency(totalNetWorth)}
+          valueClass="gradient-text text-3xl font-semibold tracking-tight"
+          glow
         />
-        <MetricCard
+        <KpiCard
+          label="This Month"
+          value={formatChange(monthlyChange)}
+          sub={`${monthlyChangePct}% vs last month`}
+          positive={monthlyChange >= 0}
+        />
+        <KpiCard
           label="Total P&L"
-          value={`${totalGainLoss >= 0 ? '+' : ''}${formatCurrency(totalGainLoss)}`}
-          detail={`${gainLossPercent}% overall`}
-          tone={totalGainLoss >= 0 ? '#18a871' : '#e65054'}
+          value={formatChange(totalGainLoss)}
+          sub={`${gainLossPct}% on cost basis`}
+          positive={totalGainLoss >= 0}
+        />
+        <KpiCard
+          label="Wellness Score"
+          value={`${score}/100`}
+          sub={healthStatus.label}
+          scoreColor={healthStatus.color}
+          icon={<ShieldCheck className="h-4 w-4" style={{ color: healthStatus.color }} />}
         />
       </div>
 
-      <div className="grid grid-cols-5 gap-6">
-        <div className="col-span-2 glass-card p-6">
-          <p className="app-kicker">Allocation</p>
-          <p className="mt-2 text-lg font-semibold text-white">Asset Allocation</p>
-          <p className="mt-1 text-sm text-white/40">A quick view of concentration risk across categories.</p>
-          <div className="mt-5">
-            <ResponsiveContainer width="100%" height={220}>
-              <PieChart>
-                <Pie
-                  data={pieData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={95}
-                  paddingAngle={2}
-                  dataKey="value"
-                  stroke="none"
+      {/* ── Row 2: Trend Chart + Allocation ───────────────────── */}
+      <div className="grid grid-cols-5 gap-5">
+
+        {/* Net Worth Over Time */}
+        <div className="col-span-3 glass-card p-6">
+          <div className="flex items-start justify-between mb-4">
+            <SectionHeader title="Net Worth Over Time" sub="Monthly snapshots" />
+            <div className="flex items-center gap-1 bg-white/[0.04] rounded-xl p-1 flex-shrink-0">
+              {TIME_RANGES.map((r) => (
+                <button
+                  key={r.label}
+                  type="button"
+                  onClick={() => setActiveRange(r.label)}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all duration-150 ${
+                    activeRange === r.label
+                      ? 'bg-white/10 text-white'
+                      : 'text-white/35 hover:text-white/60'
+                  }`}
                 >
-                  {pieData.map((entry) => (
-                    <Cell key={entry.key} fill={CATEGORY_COLORS[entry.key]} />
-                  ))}
-                </Pie>
-                <Tooltip content={<CustomTooltip />} />
-              </PieChart>
-            </ResponsiveContainer>
+                  {r.label}
+                </button>
+              ))}
+            </div>
           </div>
-          <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-2">
+          <ResponsiveContainer width="100%" height={270}>
+            <AreaChart data={filteredHistory}>
+              <defs>
+                <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#2f7cf6" stopOpacity={0.25} />
+                  <stop offset="100%" stopColor="#2f7cf6" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid stroke="rgba(255,255,255,0.04)" strokeDasharray="4 4" />
+              <XAxis dataKey="month" tick={{ fill: 'rgba(255,255,255,0.28)', fontSize: 11 }} axisLine={false} tickLine={false} />
+              <YAxis
+                tick={{ fill: 'rgba(255,255,255,0.28)', fontSize: 11 }}
+                axisLine={false} tickLine={false}
+                tickFormatter={(v) => `${(v / 1000).toFixed(0)}K`}
+                domain={['dataMin - 15000', 'dataMax + 15000']}
+              />
+              <Tooltip content={<ChartTooltip />} />
+              <Area type="monotone" dataKey="value" stroke="#2f7cf6" strokeWidth={2} fill="url(#areaGrad)" dot={false} />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+
+        {/* Asset Allocation */}
+        <div className="col-span-2 glass-card p-6">
+          <SectionHeader title="Asset Allocation" sub="Concentration by category" />
+          <ResponsiveContainer width="100%" height={170} className="mt-3">
+            <PieChart>
+              <Pie
+                data={pieData}
+                cx="50%" cy="50%"
+                innerRadius={48} outerRadius={78}
+                paddingAngle={2} dataKey="value" stroke="none"
+              >
+                {pieData.map((entry) => (
+                  <Cell key={entry.key} fill={CATEGORY_COLORS[entry.key]} />
+                ))}
+              </Pie>
+              <Tooltip content={<ChartTooltip />} />
+            </PieChart>
+          </ResponsiveContainer>
+          <div className="mt-3 space-y-2">
             {pieData.map((entry) => (
-              <div key={entry.key} className="flex items-center gap-2 text-xs">
-                <div className="h-2.5 w-2.5 flex-shrink-0 rounded-full" style={{ backgroundColor: CATEGORY_COLORS[entry.key] }} />
-                <span className="truncate text-white/50">{entry.name}</span>
-                <span className="ml-auto font-medium text-white/80">
-                  {totalNetWorth > 0 ? ((entry.value / totalNetWorth) * 100).toFixed(0) : '0'}%
-                </span>
+              <div key={entry.key} className="flex items-center gap-2.5">
+                <div className="h-2 w-2 rounded-full flex-shrink-0" style={{ backgroundColor: CATEGORY_COLORS[entry.key] }} />
+                <span className="text-xs text-white/50 flex-1 truncate">{entry.name}</span>
+                <div className="flex items-center gap-2">
+                  <div className="h-1 w-14 rounded-full bg-white/[0.06] overflow-hidden">
+                    <div
+                      className="h-full rounded-full"
+                      style={{
+                        width: `${totalNetWorth > 0 ? (entry.value / totalNetWorth) * 100 : 0}%`,
+                        backgroundColor: CATEGORY_COLORS[entry.key],
+                      }}
+                    />
+                  </div>
+                  <span className="text-xs font-medium text-white/70 w-8 text-right">
+                    {totalNetWorth > 0 ? ((entry.value / totalNetWorth) * 100).toFixed(0) : 0}%
+                  </span>
+                </div>
               </div>
             ))}
           </div>
         </div>
-
-        <div className="col-span-3 glass-card p-6">
-          <p className="app-kicker">Trajectory</p>
-          <p className="mt-2 text-lg font-semibold text-white">Net Worth Over Time</p>
-          <p className="mt-1 text-sm text-white/40">Snapshot history makes progress and reversals easy to spot.</p>
-          <div className="mt-5">
-            <ResponsiveContainer width="100%" height={280}>
-              <AreaChart data={history}>
-                <defs>
-                  <linearGradient id="netWorthGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#3B82F6" stopOpacity={0.3} />
-                    <stop offset="100%" stopColor="#3B82F6" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid stroke="rgba(255,255,255,0.04)" strokeDasharray="3 3" />
-                <XAxis
-                  dataKey="month"
-                  tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 11 }}
-                  axisLine={false}
-                  tickLine={false}
-                />
-                <YAxis
-                  tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 11 }}
-                  axisLine={false}
-                  tickLine={false}
-                  tickFormatter={(v) => `${(v / 1000).toFixed(0)}K`}
-                  domain={['dataMin - 10000', 'dataMax + 10000']}
-                />
-                <Tooltip content={<CustomTooltip />} />
-                <Area
-                  type="monotone"
-                  dataKey="value"
-                  stroke="#3B82F6"
-                  strokeWidth={2.5}
-                  fill="url(#netWorthGrad)"
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-6">
+      {/* ── Row 3: Wellness + Insights ────────────────────────── */}
+      <div className="grid grid-cols-2 gap-5">
+
+        {/* Wellness Score Breakdown */}
         <div className="glass-card p-6">
-          <p className="app-kicker">Breakdown</p>
-          <p className="mt-2 text-lg font-semibold text-white">Wellness Score Breakdown</p>
-          <p className="mt-1 text-sm text-white/40">The four components behind the headline health number.</p>
-          <div className="mt-5 space-y-4">
+          <div className="flex items-start justify-between mb-5">
+            <SectionHeader title="Wellness Breakdown" sub="The 4 factors behind your score" />
+            <div className="flex items-center gap-1.5 flex-shrink-0">
+              <ShieldCheck className="h-3.5 w-3.5" style={{ color: healthStatus.color }} />
+              <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: healthStatus.color }}>
+                {healthStatus.label}
+              </span>
+            </div>
+          </div>
+          <div className="space-y-4">
             {breakdown.map((item) => (
               <div key={item.label}>
-                <div className="mb-1.5 flex items-center justify-between">
-                  <span className="text-sm text-white/70">{item.label}</span>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-white/40">{item.detail}</span>
-                    <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-sm text-white/75">{item.label}</span>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-white/35">{item.detail}</span>
+                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
                       item.status === 'pass'
-                        ? 'bg-positive/10 text-positive'
-                        : 'bg-negative/10 text-negative'
+                        ? 'bg-emerald-400/10 text-emerald-400'
+                        : 'bg-red-400/10 text-red-400'
                     }`}>
                       {item.score}/{item.max}
                     </span>
                   </div>
                 </div>
-                <div className="h-1.5 overflow-hidden rounded-full bg-white/[0.06]">
+                <div className="h-1.5 rounded-full bg-white/[0.06] overflow-hidden">
                   <div
                     className="h-full rounded-full transition-all duration-500"
                     style={{
                       width: `${(item.score / item.max) * 100}%`,
-                      backgroundColor: item.status === 'pass' ? '#10B981' : '#EF4444',
+                      backgroundColor: item.status === 'pass' ? '#18a871' : '#e65054',
                     }}
                   />
                 </div>
               </div>
             ))}
           </div>
+          <div className="mt-5 pt-4 border-t border-white/[0.06] flex items-center justify-between">
+            <span className="text-sm text-white/50">Overall score</span>
+            <span className="text-2xl font-semibold" style={{ color: healthStatus.color }}>{score}/100</span>
+          </div>
         </div>
 
+        {/* Quick Insights */}
         <div className="glass-card p-6">
-          <p className="app-kicker">Signals</p>
-          <p className="mt-2 text-lg font-semibold text-white">Quick Insights</p>
-          <p className="mt-1 text-sm text-white/40">The clearest risks and strengths in the current portfolio.</p>
-          <div className="mt-5 space-y-3">
-            {insights.highlights.slice(0, 4).map((insight) => (
-              <div key={insight.title} className={`flex gap-3 rounded-xl border bg-white/[0.02] p-3 ${insightBorders[insight.type]}`}>
+          <SectionHeader title="Quick Insights" sub="Key risks and strengths" />
+          <div className="mt-5 space-y-2">
+            {insights.highlights.slice(0, 5).map((insight) => (
+              <div
+                key={insight.title}
+                className={`flex items-start gap-3 px-3.5 py-3 rounded-xl border ${insightBg[insight.type]}`}
+              >
                 <div className="mt-0.5 flex-shrink-0">{insightIcons[insight.type]}</div>
-                <div>
-                  <p className="text-sm font-medium text-white/80">{insight.title}</p>
-                  <p className="mt-0.5 text-xs leading-relaxed text-white/40">{insight.message}</p>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-white/85 leading-tight">{insight.title}</p>
+                  <p className="text-xs text-white/45 mt-0.5 leading-snug">{insight.message}</p>
                 </div>
               </div>
             ))}
+            {insights.highlights.length === 0 && (
+              <p className="text-sm text-white/30 py-4 text-center">No insights available yet.</p>
+            )}
           </div>
         </div>
       </div>
+
+      {/* ── Row 4: Top Holdings Table ─────────────────────────── */}
+      {topHoldings.length > 0 && (
+        <div className="glass-card p-6">
+          <SectionHeader title="Top Holdings" sub="Your 5 largest positions by value" />
+          <div className="mt-5">
+            <div className="grid grid-cols-5 gap-4 px-3 pb-2 border-b border-white/[0.06]">
+              {['Asset', 'Category', 'Current Value', 'Gain / Loss', 'Return'].map((h) => (
+                <p key={h} className="text-xs font-semibold text-white/30 uppercase tracking-wider">{h}</p>
+              ))}
+            </div>
+            <div className="space-y-1 mt-1">
+              {topHoldings.map((asset) => (
+                <div
+                  key={asset.id}
+                  className="grid grid-cols-5 gap-4 items-center px-3 py-3 rounded-xl hover:bg-white/[0.03] transition-colors duration-150"
+                >
+                  <p className="text-sm font-medium text-white/85 truncate">{asset.name}</p>
+                  <span
+                    className="text-xs px-2 py-1 rounded-lg w-fit"
+                    style={{
+                      backgroundColor: `${CATEGORY_COLORS[asset.category]}18`,
+                      color: CATEGORY_COLORS[asset.category],
+                    }}
+                  >
+                    {ASSET_CATEGORIES[asset.category] || asset.category}
+                  </span>
+                  <p className="text-sm font-semibold text-white/85">{formatCurrency(asset.value)}</p>
+                  <div className="flex items-center gap-1.5">
+                    {asset.gain >= 0
+                      ? <ArrowUpRight className="h-3.5 w-3.5 text-emerald-400 flex-shrink-0" />
+                      : <ArrowDownRight className="h-3.5 w-3.5 text-red-400 flex-shrink-0" />
+                    }
+                    <span className={`text-sm font-medium ${asset.gain >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                      {formatChange(asset.gain)}
+                    </span>
+                  </div>
+                  <span className={`text-sm font-medium ${asset.gainPct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                    {asset.gainPct >= 0 ? '+' : ''}{asset.gainPct.toFixed(1)}%
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   )
 }
 
-function MetricCard({ label, value, detail, tone = 'var(--app-text)' }) {
+function SectionHeader({ title, sub }) {
   return (
-    <div className="glass-card p-5">
-      <p className="app-kicker">{label}</p>
-      <p className="mt-3 text-2xl font-semibold" style={{ color: tone }}>{value}</p>
-      <p className="mt-2 text-sm text-white/45">{detail}</p>
+    <div>
+      <h3 className="text-sm font-semibold text-white/85">{title}</h3>
+      <p className="text-xs text-white/35 mt-0.5">{sub}</p>
+    </div>
+  )
+}
+
+function KpiCard({ label, value, sub, positive, valueClass, glow, scoreColor, icon }) {
+  const isNeutral = positive === undefined && !scoreColor
+  return (
+    <div className={`glass-card p-5 ${glow ? 'glow-blue' : ''}`}>
+      <div className="flex items-center justify-between mb-3">
+        <p className="app-kicker">{label}</p>
+        {icon}
+      </div>
+      <p
+        className={valueClass ?? `text-2xl font-semibold ${
+          scoreColor ? '' : isNeutral ? 'text-white' : positive ? 'text-emerald-400' : 'text-red-400'
+        }`}
+        style={scoreColor ? { color: scoreColor } : undefined}
+      >
+        {value}
+      </p>
+      {sub && (
+        <p
+          className="text-xs mt-1.5"
+          style={scoreColor ? { color: `${scoreColor}99` } : undefined}
+        >
+          <span className={scoreColor ? 'font-semibold' : positive === false ? 'text-red-400/60' : 'text-white/35'}>
+            {sub}
+          </span>
+        </p>
+      )}
     </div>
   )
 }
