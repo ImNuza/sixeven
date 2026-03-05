@@ -6,10 +6,6 @@ export default function Layout() {
     <div className="app-shell">
       <Sidebar />
       <main className="ml-64 min-h-screen px-8 py-6">
-        <div className="app-topbar sticky top-6 z-40 mb-6 px-5 py-4">
-          <p className="app-kicker">Portfolio Workspace</p>
-          <p className="app-subtitle mt-1 text-sm">A calmer, clearer command center for your balance sheet.</p>
-        </div>
         <Outlet />
       </main>
     </div>

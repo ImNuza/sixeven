@@ -1,6 +1,8 @@
+import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
-import { LayoutDashboard, Wallet, PlusCircle, Lightbulb, Shield, LogOut } from 'lucide-react'
+import { LayoutDashboard, Wallet, PlusCircle, Lightbulb, Shield, LogOut, Calculator } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext.jsx'
+import CalculatorModal from './Calculator.jsx'
 
 const navItems = [
   { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
@@ -22,6 +24,7 @@ function initialsFor(username) {
 
 export default function Sidebar() {
   const { user, logout } = useAuth()
+  const [showCalc, setShowCalc] = useState(false)
 
   return (
     <aside className="app-sidebar fixed left-0 top-0 z-50 flex h-screen w-64 flex-col">
@@ -54,6 +57,14 @@ export default function Sidebar() {
             {label}
           </NavLink>
         ))}
+        <button
+          type="button"
+          onClick={() => setShowCalc(true)}
+          className="flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-sm font-medium text-white/50 hover:bg-white/[0.04] hover:text-white/80 transition-all duration-200"
+        >
+          <Calculator className="h-[18px] w-[18px]" />
+          Calculator
+        </button>
       </nav>
 
       <div className="border-t border-white/[0.06] px-3 py-3 space-y-1">
@@ -85,6 +96,7 @@ export default function Sidebar() {
           Sign Out
         </button>
       </div>
+      {showCalc && <CalculatorModal onClose={() => setShowCalc(false)} />}
     </aside>
   )
 }

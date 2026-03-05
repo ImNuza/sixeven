@@ -15,6 +15,45 @@ function formatCurrency(value) {
   }).format(value || 0)
 }
 
+// ── Asset logo helpers ────────────────────────────────────────
+const CRYPTO_LOGO_MAP = {
+  BTC: 'https://assets.coingecko.com/coins/images/1/small/bitcoin.png',
+  ETH: 'https://assets.coingecko.com/coins/images/279/small/ethereum.png',
+  BNB: 'https://assets.coingecko.com/coins/images/825/small/bnb-icon2_2x.png',
+  SOL: 'https://assets.coingecko.com/coins/images/4128/small/solana.png',
+  XRP: 'https://assets.coingecko.com/coins/images/44/small/xrp-symbol-white-128.png',
+  ADA: 'https://assets.coingecko.com/coins/images/975/small/cardano.png',
+  DOGE: 'https://assets.coingecko.com/coins/images/5/small/dogecoin.png',
+  DOT: 'https://assets.coingecko.com/coins/images/12171/small/polkadot.png',
+  AVAX: 'https://assets.coingecko.com/coins/images/12559/small/Avalanche_Circle_RedWhite_Trans.png',
+  LINK: 'https://assets.coingecko.com/coins/images/877/small/chainlink-new-logo.png',
+  MATIC: 'https://assets.coingecko.com/coins/images/4713/small/matic-token-icon.png',
+  UNI: 'https://assets.coingecko.com/coins/images/12504/small/uniswap-uni.png',
+  LTC: 'https://assets.coingecko.com/coins/images/2/small/litecoin.png',
+}
+
+const STOCK_DOMAIN_MAP = {
+  AAPL: 'apple.com', MSFT: 'microsoft.com', GOOGL: 'google.com', GOOG: 'google.com',
+  AMZN: 'amazon.com', TSLA: 'tesla.com', NVDA: 'nvidia.com', META: 'meta.com',
+  NFLX: 'netflix.com', DIS: 'disney.com', V: 'visa.com', MA: 'mastercard.com',
+  JPM: 'jpmorganchase.com', BAC: 'bankofamerica.com', WMT: 'walmart.com',
+  JNJ: 'jnj.com', PG: 'pg.com', KO: 'coca-cola.com', PEP: 'pepsico.com',
+  'D05.SI': 'dbs.com', 'O39.SI': 'ocbc.com', 'U11.SI': 'uobgroup.com',
+  'Z74.SI': 'singtel.com', 'C6L.SI': 'singaporeair.com', 'BN4.SI': 'keppelcorp.com',
+}
+
+function getAssetLogoUrl(asset) {
+  const ticker = (asset.ticker || '').toUpperCase().replace('.SI', '')
+  if (asset.category === 'CRYPTO') {
+    return CRYPTO_LOGO_MAP[ticker] || null
+  }
+  if (asset.category === 'STOCKS') {
+    const domain = STOCK_DOMAIN_MAP[asset.ticker] || STOCK_DOMAIN_MAP[ticker]
+    if (domain) return `https://logo.clearbit.com/${domain}`
+  }
+  return null
+}
+
 function getInitialParams(searchParams) {
   return {
     search: searchParams.get('search') || '',
@@ -375,15 +414,18 @@ export default function Assets() {
                 key={asset.id}
                 className="grid grid-cols-[2.2fr_1fr_1fr_1fr_1fr_1fr] gap-4 px-6 py-5 text-sm"
               >
-                <div className="min-w-0">
-                  <div className="font-medium text-white">{asset.name}</div>
-                  <div className="mt-1 text-xs text-white/40">
-                    {asset.ticker || asset.institution || 'Manual asset'}
-                    {asset.quantity != null ? ` • Qty ${asset.quantity}` : ''}
+                <div className="min-w-0 flex items-center gap-3">
+                  <AssetLogo asset={asset} />
+                  <div className="min-w-0">
+                    <div className="font-medium text-white truncate">{asset.name}</div>
+                    <div className="mt-0.5 text-xs text-white/40">
+                      {asset.ticker || asset.institution || 'Manual asset'}
+                      {asset.quantity != null ? ` • Qty ${asset.quantity}` : ''}
+                    </div>
+                    {detailSummary ? (
+                      <div className="mt-0.5 text-xs text-white/30 truncate">{detailSummary}</div>
+                    ) : null}
                   </div>
-                  {detailSummary ? (
-                    <div className="mt-1 text-xs text-white/30">{detailSummary}</div>
-                  ) : null}
                 </div>
 
                 <div className="flex items-center">
@@ -530,5 +572,33 @@ function StatCard({ label, value, detail, icon: Icon }) {
         ) : null}
       </div>
     </div>
+  )
+}
+
+function AssetLogo({ asset }) {
+  const [failed, setFailed] = useState(false)
+  const url = getAssetLogoUrl(asset)
+  const initial = (asset.name || '?')[0].toUpperCase()
+  const color = CATEGORY_COLORS[asset.category] || '#2f7cf6'
+
+  if (!url || failed) {
+    return (
+      <div
+        className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl text-sm font-bold text-white"
+        style={{ backgroundColor: `${color}22`, border: `1px solid ${color}30`, color }}
+      >
+        {initial}
+      </div>
+    )
+  }
+
+  return (
+    <img
+      src={url}
+      alt={asset.name}
+      onError={() => setFailed(true)}
+      className="h-9 w-9 flex-shrink-0 rounded-xl object-contain p-0.5"
+      style={{ backgroundColor: `${CATEGORY_COLORS[asset.category]}12`, border: `1px solid ${CATEGORY_COLORS[asset.category]}20` }}
+    />
   )
 }

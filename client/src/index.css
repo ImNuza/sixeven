@@ -235,3 +235,54 @@ html[data-theme='light'] {
     background: color-mix(in srgb, var(--app-surface) 94%, transparent) !important;
   }
 }
+
+/* ── Landing page animated orbs ─────────────────────────────── */
+@keyframes orb-float-1 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33% { transform: translate(40px, -60px) scale(1.08); }
+  66% { transform: translate(-30px, 30px) scale(0.95); }
+}
+@keyframes orb-float-2 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  40% { transform: translate(-50px, 40px) scale(1.05); }
+  70% { transform: translate(30px, -20px) scale(0.97); }
+}
+@keyframes orb-float-3 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  30% { transform: translate(30px, 50px) scale(1.1); }
+  60% { transform: translate(-20px, -40px) scale(0.93); }
+}
+@keyframes orb-float-4 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(-40px, -30px) scale(1.06); }
+}
+
+.landing-orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(80px);
+}
+.landing-orb-1 {
+  width: 500px; height: 500px;
+  top: -120px; left: -100px;
+  background: radial-gradient(circle, rgba(47,124,246,0.18) 0%, transparent 70%);
+  animation: orb-float-1 14s ease-in-out infinite;
+}
+.landing-orb-2 {
+  width: 420px; height: 420px;
+  top: 30%; right: -80px;
+  background: radial-gradient(circle, rgba(24,168,113,0.12) 0%, transparent 70%);
+  animation: orb-float-2 18s ease-in-out infinite 3s;
+}
+.landing-orb-3 {
+  width: 380px; height: 380px;
+  bottom: 5%; left: 20%;
+  background: radial-gradient(circle, rgba(113,208,255,0.10) 0%, transparent 70%);
+  animation: orb-float-3 22s ease-in-out infinite 6s;
+}
+.landing-orb-4 {
+  width: 300px; height: 300px;
+  top: 55%; left: 45%;
+  background: radial-gradient(circle, rgba(240,161,0,0.07) 0%, transparent 70%);
+  animation: orb-float-4 16s ease-in-out infinite 2s;
+}
