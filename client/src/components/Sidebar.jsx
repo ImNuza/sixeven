@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
-import { LayoutDashboard, Wallet, PlusCircle, Lightbulb, Link2, Shield, LogOut, Calculator, Sparkles, ChevronLeft, ChevronRight } from 'lucide-react'
+import { LayoutDashboard, Wallet, PlusCircle, Lightbulb, Shield, LogOut, Calculator, Sparkles, ChevronLeft, ChevronRight } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext.jsx'
 import { useChat } from '../context/ChatContext.jsx'
 import { useSidebar } from '../context/SidebarContext.jsx'
@@ -9,7 +9,6 @@ import CalculatorModal from './Calculator.jsx'
 const navItems = [
   { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/assets',    icon: Wallet,          label: 'Assets' },
-  { to: '/connect',   icon: Link2,           label: 'Connect' },
   { to: '/add',       icon: PlusCircle,      label: 'Add Asset' },
   { to: '/insights',  icon: Lightbulb,       label: 'Insights' },
 ]

@@ -1,6 +1,7 @@
 import { Outlet } from 'react-router-dom'
 import Sidebar from './Sidebar'
 import ChatPanel from './ChatPanel'
+import ToastContainer from './ToastContainer'
 import { useChat } from '../context/ChatContext'
 import { useSidebar } from '../context/SidebarContext'
 
@@ -21,6 +22,7 @@ export default function Layout() {
         <Outlet />
       </main>
       <ChatPanel />
+      <ToastContainer />
     </div>
   )
 }

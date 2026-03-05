@@ -34,8 +34,8 @@ const RINGS = [
   },
 ]
 
-const ORBIT_R = 118 // orbital radius (translateX distance)
-const C = 150       // center of container
+const ORBIT_R = 82  // orbital radius (translateX distance)
+const C = 120       // center of container
 
 function AtomAnimation() {
   const [merging, setMerging] = useState(false)
@@ -49,10 +49,10 @@ function AtomAnimation() {
     return () => clearInterval(id)
   }, [])
 
-  const NODE = 48  // symbol circle diameter
+  const NODE = 44  // symbol circle diameter
 
   return (
-    <div className="relative flex items-center justify-center" style={{ width: 300, height: 300 }}>
+    <div className="relative flex items-center justify-center" style={{ width: 240, height: 240 }}>
       {/* Subtle background glow */}
       <div
         className="absolute inset-0 rounded-full"
@@ -65,8 +65,8 @@ function AtomAnimation() {
 
       {/* Orbital ring lines (SVG) */}
       <svg
-        width="300"
-        height="300"
+        width="240"
+        height="240"
         className="absolute inset-0"
         style={{ overflow: 'visible', pointerEvents: 'none' }}
       >
@@ -76,7 +76,7 @@ function AtomAnimation() {
             cx={C}
             cy={C}
             rx={ORBIT_R}
-            ry={44}
+            ry={32}
             fill="none"
             stroke="rgba(47,124,246,0.22)"
             strokeWidth="1"
