@@ -248,6 +248,16 @@ html[data-theme='light'] {
   }
 }
 
+/* ── Atom orbit keyframes ────────────────────────────────────── */
+@keyframes orbit-cw {
+  from { transform: rotate(0deg) translateX(118px) rotate(0deg); }
+  to   { transform: rotate(360deg) translateX(118px) rotate(-360deg); }
+}
+@keyframes orbit-ccw {
+  from { transform: rotate(0deg) translateX(118px) rotate(0deg); }
+  to   { transform: rotate(-360deg) translateX(118px) rotate(360deg); }
+}
+
 /* ── Landing page animated orbs ─────────────────────────────── */
 @keyframes orb-float-1 {
   0%, 100% { transform: translate(0, 0) scale(1); }

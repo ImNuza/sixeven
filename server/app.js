@@ -136,6 +136,51 @@ export function createApp({
     }
   })
 
+  // ── AI Chat ────────────────────────────────────────────────
+  app.post('/api/chat', requireAuth, async (req, res) => {
+    try {
+      const { messages = [], portfolioContext = null } = req.body
+      if (!Array.isArray(messages) || messages.length === 0) {
+        return res.status(400).json({ error: 'messages array required' })
+      }
+      const apiKey = process.env.FEATHERLESS_API_KEY
+      if (!apiKey) return res.status(503).json({ error: 'AI service not configured' })
+
+      const { default: OpenAI } = await import('openai')
+      const openai = new OpenAI({ baseURL: 'https://api.featherless.ai/v1', apiKey })
+
+      const systemMessages = [
+        {
+          role: 'system',
+          content: `You are WealthAI, a personal financial wellness advisor embedded in SafeSeven — a wealth management app for NTU FinTech Hackathon 2026 (Schroders Wealth Wellness Hub).
+Your role: help users understand their financial health, interpret their portfolio data, and give actionable steps to improve their wealth wellness score.
+Guidelines:
+- Be warm, clear, and human — avoid overly formal language
+- Always ground advice in the user's actual portfolio data when provided
+- Focus on Singapore financial context (CPF, SGX, SGD, MAS guidelines) but handle global assets too
+- Never give specific "buy/sell X stock" advice; instead give principles and frameworks
+- Keep responses concise and scannable (use bullet points for action steps)
+- If unsure about a fact, say so — never fabricate numbers`,
+        },
+      ]
+
+      if (portfolioContext) {
+        systemMessages.push({ role: 'system', content: `Current portfolio context:\n${portfolioContext}` })
+      }
+
+      const completion = await openai.chat.completions.create({
+        model: 'Qwen/Qwen2.5-7B-Instruct',
+        messages: [...systemMessages, ...messages],
+        max_tokens: 600,
+        temperature: 0.7,
+      })
+
+      res.json({ reply: completion.choices[0].message.content })
+    } catch (err) {
+      res.status(500).json({ error: err.message || 'AI request failed' })
+    }
+  })
+
   app.get('/api/insights', requireAuth, async (req, res) => {
     try {
       await ensureFreshPrices(req.user.id)

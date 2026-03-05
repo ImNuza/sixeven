@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, CheckCircle, Info, RefreshCw, ShieldCheck, ArrowRight } from 'lucide-react'
+import { AlertTriangle, CheckCircle, Info, RefreshCw, ShieldCheck, ArrowRight, Sparkles } from 'lucide-react'
 import { fetchAssets, fetchPortfolioSummary, refreshPrices } from '../services/api.js'
 import { calculateWellnessScore, getWellnessStatus } from '../data/wellnessCalculator.js'
 import { buildPortfolioInsights } from '../data/portfolioInsights.js'
+import { useChat } from '../context/ChatContext.jsx'
 
 function formatCurrency(value) {
   return new Intl.NumberFormat('en-SG', {
@@ -45,6 +46,7 @@ const ACTION_MAP = {
 }
 
 export default function Insights() {
+  const { openChat, setPortfolioContext } = useChat()
   const [assets, setAssets] = useState([])
   const [summary, setSummary] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -90,6 +92,19 @@ export default function Insights() {
 
   const fails = actions.filter((a) => a.status === 'fail')
   const passes = actions.filter((a) => a.status === 'pass')
+
+  useEffect(() => {
+    if (!summary) return
+    const lines = [
+      `Financial Health Score: ${score}/100 (${healthStatus.label})`,
+      `Net Worth: SGD ${summary.totalNetWorth?.toLocaleString() || 0}`,
+      `Total Gain/Loss: SGD ${summary.totalGainLoss?.toLocaleString() || 0} (${summary.gainLossPct?.toFixed(1) || 0}%)`,
+      `Failing factors: ${fails.map(f => `${f.label} (${f.score}/${f.max})`).join(', ') || 'none'}`,
+      `Asset categories: ${[...new Set(assets.map(a => a.category))].join(', ')}`,
+      `Total assets: ${assets.length}`,
+    ]
+    setPortfolioContext(lines.join('\n'))
+  }, [score, healthStatus, summary, fails, assets, setPortfolioContext])
 
   async function handleRefresh() {
     try {
@@ -316,6 +331,46 @@ export default function Insights() {
               </div>
               <p className="text-xs text-white/30">{item.detail}</p>
             </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ── WealthAI ──────────────────────────────────────────── */}
+      <div className="glass-card p-6">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2.5">
+            <div className="h-8 w-8 rounded-xl flex items-center justify-center bg-accent/10">
+              <Sparkles className="h-4 w-4 text-accent" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-white/90">Ask WealthAI</p>
+              <p className="text-xs text-white/40">Get personalised advice based on your portfolio</p>
+            </div>
+          </div>
+          <button
+            onClick={() => openChat()}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90"
+            style={{ background: 'var(--app-accent)' }}
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            Open Chat
+          </button>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          {[
+            { label: 'Explain my health score', prompt: `My financial health score is ${score}/100 (${healthStatus.label}). Can you explain what this means and what I should focus on?` },
+            { label: 'Fix my top issue', prompt: fails[0] ? `My top failing factor is "${fails[0].label}" (${fails[0].score}/${fails[0].max}). What steps should I take to fix this?` : 'What should I improve first to boost my wellness score?' },
+            { label: 'Diversification tips', prompt: 'Based on my portfolio, how can I improve my diversification?' },
+            { label: 'Build wealth faster', prompt: 'What are the most impactful steps I can take right now to grow my wealth more effectively?' },
+          ].map(({ label, prompt }) => (
+            <button
+              key={label}
+              onClick={() => openChat(prompt)}
+              className="text-left text-xs px-3.5 py-3 rounded-xl border transition-all hover:border-accent/30 hover:bg-accent/[0.05]"
+              style={{ color: 'var(--app-text-soft)', borderColor: 'var(--app-border)', background: 'var(--app-surface)' }}
+            >
+              <span className="text-accent mr-1.5">→</span>{label}
+            </button>
           ))}
         </div>
       </div>

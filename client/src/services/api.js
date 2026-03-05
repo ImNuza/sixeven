@@ -183,5 +183,13 @@ export async function fetchWalletBalances(address, chainId = 1) {
   return request(`/api/wallet/balances?address=${address}&chainId=${chainId}`)
 }
 
+// ── AI Chat ───────────────────────────────────────────────────
+export async function sendChatMessage(messages, portfolioContext = null) {
+  return request('/api/chat', {
+    method: 'POST',
+    body: JSON.stringify({ messages, portfolioContext }),
+  })
+}
+
 // ── Plaid / SGFinDex endpoints kept server-side for production integration ──
 // BankPanel and SingpassPanel use local mock data for prototype demo
