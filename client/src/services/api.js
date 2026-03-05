@@ -162,3 +162,26 @@ export async function deleteAsset(id) {
     method: 'DELETE',
   })
 }
+
+// ── Wallet connections ────────────────────────────────────────
+export async function fetchWalletConnections() {
+  return request('/api/wallet/connections')
+}
+
+export async function saveWalletConnection(address, chainId = 1, label = null) {
+  return request('/api/wallet/connections', {
+    method: 'POST',
+    body: JSON.stringify({ address, chainId, label }),
+  })
+}
+
+export async function deleteWalletConnection(id) {
+  return request(`/api/wallet/connections/${id}`, { method: 'DELETE' })
+}
+
+export async function fetchWalletBalances(address, chainId = 1) {
+  return request(`/api/wallet/balances?address=${address}&chainId=${chainId}`)
+}
+
+// ── Plaid / SGFinDex endpoints kept server-side for production integration ──
+// BankPanel and SingpassPanel use local mock data for prototype demo

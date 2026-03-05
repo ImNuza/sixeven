@@ -70,6 +70,40 @@ export const schema = `
   CREATE INDEX IF NOT EXISTS idx_assets_user_institution_lower ON assets (user_id, LOWER(institution));
   CREATE INDEX IF NOT EXISTS idx_snapshots_user_date_created ON net_worth_snapshots (user_id, snapshot_date ASC, created_at ASC);
   CREATE INDEX IF NOT EXISTS idx_price_cache_updated_at ON price_cache (updated_at DESC);
+
+  CREATE TABLE IF NOT EXISTS wallet_connections (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    address VARCHAR(42) NOT NULL,
+    chain_id INTEGER NOT NULL DEFAULT 1,
+    label VARCHAR(50),
+    connected_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(user_id, address, chain_id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_wallet_connections_user ON wallet_connections (user_id);
+
+  CREATE TABLE IF NOT EXISTS plaid_items (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    item_id VARCHAR(120) NOT NULL,
+    access_token TEXT NOT NULL,
+    institution_id VARCHAR(80),
+    institution_name VARCHAR(120),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(user_id, item_id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_plaid_items_user ON plaid_items (user_id);
+
+  CREATE TABLE IF NOT EXISTS singpass_connections (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE UNIQUE,
+    myinfo_sub VARCHAR(100),
+    uinfin_masked VARCHAR(20),
+    data JSONB NOT NULL DEFAULT '{}',
+    fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
 `
 
 export async function ensureSystemSeedUser(client) {

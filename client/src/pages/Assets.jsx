@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { ArrowDownUp, ChevronLeft, ChevronRight, Download, Pencil, PlusCircle, RefreshCw, Search, Trash2, Wallet } from 'lucide-react'
+import { ArrowDownUp, ChevronLeft, ChevronRight, Download, Link2, Pencil, PlusCircle, RefreshCw, Search, Trash2, Wallet } from 'lucide-react'
 import AssetForm from '../components/AssetForm'
 import { ASSET_CATEGORIES, CATEGORY_COLORS } from '../../../shared/constants.js'
 import { deleteAsset, fetchAssetsPage, fetchPrices, refreshPrices, updateAsset } from '../services/api.js'
@@ -305,6 +305,23 @@ export default function Assets() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
+      <Link
+        to="/connect"
+        className="flex items-center justify-between gap-4 rounded-3xl border px-5 py-4 transition-all hover:border-accent/30 hover:bg-accent/[0.04]"
+        style={{ borderColor: 'var(--app-border)', background: 'var(--app-surface)' }}
+      >
+        <div className="flex items-center gap-3">
+          <div className="h-9 w-9 rounded-2xl flex items-center justify-center bg-accent/10 flex-shrink-0">
+            <Link2 className="h-4 w-4 text-accent" />
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-white/90">Connect Data Sources</p>
+            <p className="text-xs text-white/40">Link Singpass · Bank Accounts · Crypto Wallets</p>
+          </div>
+        </div>
+        <span className="text-xs font-medium text-accent">Open →</span>
+      </Link>
+
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-white">Asset Inventory</h1>

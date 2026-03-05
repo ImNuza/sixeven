@@ -220,18 +220,30 @@ html[data-theme='light'] {
     background: transparent !important;
   }
 
+  html[data-theme='light'] .border-white\/\[0\.04\],
   html[data-theme='light'] .border-white\/\[0\.06\],
+  html[data-theme='light'] .border-white\/\[0\.07\],
   html[data-theme='light'] .border-white\/\[0\.08\],
-  html[data-theme='light'] .border-white\/10 {
+  html[data-theme='light'] .border-white\/10,
+  html[data-theme='light'] .border-white\/\[0\.1\] {
     border-color: var(--app-border) !important;
   }
 
+  html[data-theme='light'] .border-white\/\[0\.12\],
+  html[data-theme='light'] .border-white\/\[0\.14\],
+  html[data-theme='light'] .border-white\/\[0\.16\],
+  html[data-theme='light'] .border-white\/20 {
+    border-color: var(--app-border-strong) !important;
+  }
+
   html[data-theme='light'] .bg-white\/\[0\.02\],
+  html[data-theme='light'] .bg-white\/\[0\.025\],
   html[data-theme='light'] .bg-white\/\[0\.03\],
   html[data-theme='light'] .bg-white\/\[0\.04\],
   html[data-theme='light'] .bg-white\/\[0\.05\],
   html[data-theme='light'] .bg-white\/\[0\.06\],
-  html[data-theme='light'] .bg-white\/\[0\.07\] {
+  html[data-theme='light'] .bg-white\/\[0\.07\],
+  html[data-theme='light'] .bg-white\/\[0\.08\] {
     background: color-mix(in srgb, var(--app-surface) 94%, transparent) !important;
   }
 }
