@@ -148,6 +148,11 @@ export const STARTER_SNAPSHOTS = [
 
 export async function seedStarterPortfolio(client, userId) {
   for (const asset of STARTER_ASSETS) {
+    // Stringify details object for storage (SQLite stores as TEXT, PostgreSQL as JSONB)
+    const detailsJson = typeof asset.details === 'string' 
+      ? asset.details 
+      : JSON.stringify(asset.details || {})
+    
     await client.query(
       `INSERT INTO assets (user_id, name, category, ticker, value, cost, quantity, date, institution, details)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
@@ -161,7 +166,7 @@ export async function seedStarterPortfolio(client, userId) {
         asset.quantity,
         asset.date,
         asset.institution,
-        asset.details,
+        detailsJson,
       ]
     )
   }

@@ -335,3 +335,43 @@ html[data-theme='light'] {
   background: radial-gradient(circle, rgba(240,161,0,0.07) 0%, transparent 70%);
   animation: orb-float-4 16s ease-in-out infinite 2s;
 }
+
+/* ── Range Slider ──────────────────────────────────────────── */
+input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+}
+
+input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #A855F7;
+  border: 2px solid #fff;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(168, 85, 247, 0.4);
+  margin-top: -7px;
+}
+
+input[type='range']::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #A855F7;
+  border: 2px solid #fff;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(168, 85, 247, 0.4);
+}
+
+input[type='range']::-webkit-slider-runnable-track {
+  height: 8px;
+  border-radius: 9999px;
+}
+
+input[type='range']::-moz-range-track {
+  height: 8px;
+  border-radius: 9999px;
+}

@@ -1,5 +1,7 @@
 import { hashPassword } from '../services/authService.js'
 import { seedStarterPortfolio } from './seedData.js'
+import { DB_TYPE } from './adapter.js'
+import { sqliteSchema } from './sqlite-schema.js'
 
 const SYSTEM_USERNAME = '__seed__'
 const SYSTEM_PASSWORD = 'seed-account-disabled'
@@ -186,11 +188,12 @@ export async function backfillLegacyPortfolio(client, systemUserId) {
 
 export async function ensureStarterPortfolio(client, userId) {
   const { rows } = await client.query(
-    'SELECT COUNT(*)::int AS count FROM assets WHERE user_id = $1',
+    'SELECT COUNT(*) AS count FROM assets WHERE user_id = $1',
     [userId]
   )
 
-  if (rows[0]?.count > 0) {
+  const count = Number(rows[0]?.count || 0)
+  if (count > 0) {
     return false
   }
 
@@ -199,7 +202,9 @@ export async function ensureStarterPortfolio(client, userId) {
 }
 
 export async function runMigrations(client) {
-  await client.query(schema)
+  // Use appropriate schema based on database type
+  const schemaToUse = DB_TYPE === 'sqlite' ? sqliteSchema : schema
+  await client.query(schemaToUse)
 
   const systemUserId = await ensureSystemSeedUser(client)
   await backfillLegacyPortfolio(client, systemUserId)

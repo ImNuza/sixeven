@@ -298,7 +298,7 @@ function AuthModal({ onClose, redirectTarget }) {
           </button>
         </form>
 
-        <p className="mt-5 text-center text-[10px]" style={{ color: 'rgba(15,23,42,0.28)', fontFamily: T.mono }}>
+        <p className="mt-6 text-center text-[10px]" style={{ color: 'rgba(15,23,42,0.28)', fontFamily: T.mono }}>
           AES-256-GCM · Argon2id · Zero-knowledge
         </p>
       </div>

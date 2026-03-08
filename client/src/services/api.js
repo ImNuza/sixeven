@@ -210,6 +210,3 @@ export async function fetchOcbcStatus() {
 export async function disconnectOcbc() {
   return request('/api/ocbc/connection', { method: 'DELETE' })
 }
-
-// ── Plaid / SGFinDex endpoints kept server-side for production integration ──
-// BankPanel and SingpassPanel use local mock data for prototype demo

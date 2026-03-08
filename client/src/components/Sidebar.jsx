@@ -50,7 +50,11 @@ export default function Sidebar() {
 
   return (
     <aside
-      className={`app-sidebar fixed left-0 top-0 z-50 flex h-screen flex-col transition-all duration-300 ease-in-out ${w}`}
+      className={`app-sidebar fixed left-0 z-50 flex flex-col transition-all duration-300 ease-in-out ${w}`}
+      style={{
+        top: '0',
+        height: '100vh',
+      }}
     >
       {/* ── Header ──────────────────────────────────────────── */}
       <div

@@ -4,6 +4,7 @@ import { fetchAssets, fetchPortfolioSummary, refreshPrices } from '../services/a
 import { calculateWellnessScore, getWellnessStatus } from '../data/wellnessCalculator.js'
 import { buildPortfolioInsights } from '../data/portfolioInsights.js'
 import { useChat } from '../context/ChatContext.jsx'
+import ScenarioSimulator from '../components/ScenarioSimulator.jsx'
 
 function formatCurrency(value) {
   return new Intl.NumberFormat('en-SG', {
@@ -334,6 +335,9 @@ export default function Insights() {
           ))}
         </div>
       </div>
+
+      {/* ── What-If Scenarios ────────────────────────────────── */}
+      <ScenarioSimulator assets={assets} />
 
       {/* ── WealthAI ──────────────────────────────────────────── */}
       <div className="glass-card p-6">
