@@ -1,6 +1,6 @@
-import { useState } from 'react'
-import { Building2, ChevronDown, ChevronUp, Download, X, Check, Loader2, Landmark, CreditCard, TrendingUp, Trash2 } from 'lucide-react'
-import { createAsset } from '../services/api.js'
+import { useState, useEffect } from 'react'
+import { Building2, ChevronDown, ChevronUp, Download, X, Check, Loader2, Landmark, CreditCard, TrendingUp, Trash2, Wifi } from 'lucide-react'
+import { createAsset, connectOcbc, fetchOcbcAccounts, fetchOcbcStatus, disconnectOcbc } from '../services/api.js'
 
 const BANKS = [
   { id: 'dbs',  name: 'DBS Bank',           country: 'SG', color: '#d3212d', logo: 'D' },
@@ -119,6 +119,171 @@ function ConnectModal({ onClose, onConnected }) {
   )
 }
 
+// ── OCBC Live Integration Panel ────────────────────────────────
+function OcbcLivePanel({ onImportDone }) {
+  const [status, setStatus]     = useState(null)   // null | 'connected' | 'disconnected'
+  const [accounts, setAccounts] = useState([])
+  const [loading, setLoading]   = useState(true)
+  const [connecting, setConnecting] = useState(false)
+  const [error, setError]       = useState('')
+  const [importedIds, setImportedIds] = useState(new Set())
+
+  async function loadStatus() {
+    try {
+      setLoading(true)
+      const s = await fetchOcbcStatus()
+      setStatus(s.connected ? 'connected' : 'disconnected')
+      if (s.connected) {
+        try {
+          const data = await fetchOcbcAccounts()
+          const list = data?.accounts || data?.data?.accounts || data || []
+          setAccounts(Array.isArray(list) ? list : [])
+        } catch (accErr) {
+          setError(`Connected but could not load accounts: ${accErr.message}`)
+        }
+      }
+    } catch {
+      setStatus('disconnected')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => { loadStatus() }, [])
+
+  async function handleConnect() {
+    try {
+      setConnecting(true)
+      setError('')
+      await connectOcbc()
+      await loadStatus()
+    } catch (err) {
+      setError(err.message)
+      setStatus('disconnected')
+    } finally {
+      setConnecting(false)
+    }
+  }
+
+  async function handleDisconnect() {
+    try {
+      await disconnectOcbc()
+      setStatus('disconnected')
+      setAccounts([])
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  async function importAccount(account) {
+    const key = account.accountId || account.id || account.accountNumber
+    if (importedIds.has(key)) return
+    const balance = account.balance?.amount || account.availableBalance?.amount || account.currentBalance || 0
+    const currency = account.balance?.currency || account.currency || 'SGD'
+    const sgd = balance * (currency === 'SGD' ? 1 : currency === 'USD' ? 1.35 : 1)
+    const today = new Date().toISOString().split('T')[0]
+    await createAsset({
+      name: account.accountName || account.name || `OCBC ${account.accountType || 'Account'}`,
+      category: 'CASH',
+      ticker: null,
+      quantity: null,
+      value: Math.max(0, sgd),
+      cost: Math.max(0, sgd),
+      date: today,
+      institution: 'OCBC Bank',
+      details: { accountType: account.accountType, currency, mask: String(account.accountNumber || '').slice(-4), importedFrom: 'ocbc' },
+    })
+    setImportedIds(prev => new Set([...prev, key]))
+    onImportDone?.()
+  }
+
+  return (
+    <div className="rounded-2xl border border-[#e94e1b]/20 bg-[#e94e1b]/[0.03] overflow-hidden mb-4">
+      <div className="flex items-center justify-between px-5 py-3.5 border-b border-white/[0.05]">
+        <div className="flex items-center gap-3">
+          <div className="h-8 w-8 rounded-xl flex items-center justify-center text-sm font-bold" style={{ background: '#e94e1b20', color: '#e94e1b' }}>O</div>
+          <div>
+            <p className="text-sm font-semibold text-white/90">OCBC Bank</p>
+            <p className="text-xs text-white/35">
+              {loading ? 'Checking connection…' : status === 'connected' ? `${accounts.length} account${accounts.length !== 1 ? 's' : ''} · Live` : 'Not connected'}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {status === 'connected' ? (
+            <>
+              <Wifi className="h-3.5 w-3.5 text-emerald-400" />
+              <button onClick={handleDisconnect} className="text-xs text-red-400/70 hover:text-red-400 transition-colors px-2 py-1 rounded-lg hover:bg-red-500/[0.07]">Disconnect</button>
+            </>
+          ) : !loading && (
+            <button onClick={handleConnect} disabled={connecting} className="inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold" style={{ background: '#e94e1b18', color: '#e94e1b', border: '1px solid #e94e1b30', opacity: connecting ? 0.6 : 1 }}>
+              {connecting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Wifi className="h-3 w-3" />}
+              {connecting ? 'Connecting…' : 'Connect OCBC'}
+            </button>
+          )}
+          {loading && <Loader2 className="h-3.5 w-3.5 animate-spin text-white/30" />}
+        </div>
+      </div>
+
+      {error && (
+        <div className="px-5 py-3 text-xs text-red-400/80 bg-red-500/[0.04] border-b border-red-500/10">{error}</div>
+      )}
+
+      {status === 'connected' && accounts.length > 0 && (
+        <div className="px-4 py-3 space-y-0">
+          {accounts.map((a, i) => {
+            const key = a.accountId || a.id || a.accountNumber || i
+            const done = importedIds.has(key)
+            const balance = a.balance?.amount ?? a.availableBalance?.amount ?? a.currentBalance ?? 0
+            const currency = a.balance?.currency || a.currency || 'SGD'
+            return (
+              <div key={key} className="flex items-center justify-between py-2.5 border-b border-white/[0.04] last:border-0">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="h-7 w-7 rounded-xl bg-white/[0.04] flex items-center justify-center flex-shrink-0">
+                    <Landmark className="h-3.5 w-3.5 text-[#e94e1b]" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-white/90">{a.accountName || a.name || 'Account'}</p>
+                    <p className="text-xs text-white/35 capitalize">{a.accountType || a.type || 'savings'} ···{String(a.accountNumber || '').slice(-4)}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-4 flex-shrink-0">
+                  <p className="text-sm font-mono text-white/80 text-right">
+                    {currency} {Number(balance).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </p>
+                  {done ? (
+                    <span className="text-xs text-emerald-400 font-medium w-14 text-right">Added ✓</span>
+                  ) : (
+                    <button onClick={() => importAccount(a)} className="text-xs text-accent border border-accent/20 bg-accent/8 rounded-lg px-2.5 py-1 hover:bg-accent/18 transition-colors w-14 text-center">
+                      Import
+                    </button>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+          <button
+            onClick={() => Promise.all(accounts.map(a => importAccount(a)))}
+            className="mt-2 w-full flex items-center justify-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/8 py-2 text-xs font-semibold text-emerald-400 hover:bg-emerald-500/15 transition-colors"
+          >
+            <Download className="h-3.5 w-3.5" /> Import All Accounts
+          </button>
+        </div>
+      )}
+
+      {status === 'connected' && accounts.length === 0 && !loading && !error && (
+        <div className="px-5 py-4 text-xs text-white/30 text-center">No accounts returned from OCBC API</div>
+      )}
+
+      {status === 'disconnected' && !loading && (
+        <div className="px-5 py-4 text-xs text-white/25 text-center">
+          Connect your OCBC account to import live balances · OAuth 2.0 · Read-only
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function BankPanel({ onImportDone }) {
   const [expanded, setExpanded] = useState(true)
   const [showModal, setShowModal] = useState(false)
@@ -193,15 +358,20 @@ export default function BankPanel({ onImportDone }) {
 
         {expanded && (
           <div className="px-6 pb-5 border-t border-white/[0.04]">
-            <div className="flex items-center gap-3 pt-4 pb-4 flex-wrap">
+            {/* OCBC Live Integration */}
+            <div className="pt-4">
+              <OcbcLivePanel onImportDone={onImportDone} />
+            </div>
+
+            <div className="flex items-center gap-3 pb-4 flex-wrap">
               <button
                 onClick={() => setShowModal(true)}
                 className="inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-500 px-5 py-2.5 text-sm font-semibold text-white shadow-md shadow-emerald-600/20 hover:shadow-emerald-600/35 transition-shadow"
               >
                 <Building2 className="h-4 w-4" />
-                Connect Bank
+                Other Banks (Demo)
               </button>
-              <p className="text-xs text-white/25">SG, US, UK, EU · 10,000+ institutions</p>
+              <p className="text-xs text-white/25">SG, US, UK, EU · mock data</p>
             </div>
 
             {connections.length === 0 ? (

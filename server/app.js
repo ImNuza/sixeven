@@ -395,6 +395,104 @@ HARD RULES:
     res.status(204).end()
   })
 
+  // ── OCBC Open API (OAuth 2.0 Client Credentials) ──────────────
+  // No redirect URL needed — server exchanges client_id + client_secret directly.
+  const OCBC_TOKEN_URL = process.env.OCBC_TOKEN_URL || 'https://api.ocbc.com/token'
+  const OCBC_API_BASE  = process.env.OCBC_API_BASE  || 'https://api.ocbc.com'
+
+  async function getOcbcToken() {
+    const clientId     = process.env.OCBC_CLIENT_ID
+    const clientSecret = process.env.OCBC_CLIENT_SECRET
+    if (!clientId || !clientSecret) throw new Error('OCBC_CLIENT_ID / OCBC_CLIENT_SECRET not set in .env')
+
+    const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString('base64')
+    const tokenRes = await axios.post(
+      OCBC_TOKEN_URL,
+      new URLSearchParams({ grant_type: 'client_credentials' }).toString(),
+      {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          Authorization: `Basic ${credentials}`,
+        },
+        timeout: 15000,
+      }
+    )
+    return tokenRes.data // { access_token, expires_in, token_type, ... }
+  }
+
+  // Connect: fetch a client-credentials token and store it
+  app.post('/api/ocbc/connect', requireAuth, async (req, res) => {
+    try {
+      const tokenData = await getOcbcToken()
+      const { access_token, expires_in } = tokenData
+      const expiresAt = new Date(Date.now() + (expires_in || 3600) * 1000)
+
+      const { encrypt } = await import('./services/encryptionService.js')
+      await pool.query(
+        `INSERT INTO ocbc_connections (user_id, access_token, expires_at)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (user_id) DO UPDATE
+           SET access_token = EXCLUDED.access_token,
+               expires_at   = EXCLUDED.expires_at,
+               connected_at = NOW()`,
+        [req.user.id, encrypt(access_token), expiresAt]
+      )
+      res.json({ connected: true, expiresAt })
+    } catch (err) {
+      console.error('[OCBC connect]', err.response?.data || err.message)
+      const detail = err.response?.data?.error_description || err.response?.data?.message || err.message
+      res.status(err.response?.status || 502).json({ error: `OCBC token request failed: ${detail}` })
+    }
+  })
+
+  app.get('/api/ocbc/accounts', requireAuth, async (req, res) => {
+    try {
+      const { rows } = await pool.query(
+        'SELECT access_token, expires_at FROM ocbc_connections WHERE user_id = $1',
+        [req.user.id]
+      )
+      if (!rows.length) return res.status(404).json({ error: 'No OCBC connection. Connect first.' })
+
+      const { decrypt } = await import('./services/encryptionService.js')
+      let accessToken = decrypt(rows[0].access_token)
+
+      // Auto-refresh if token has expired
+      if (rows[0].expires_at && new Date(rows[0].expires_at) < new Date()) {
+        const tokenData = await getOcbcToken()
+        accessToken = tokenData.access_token
+        const expiresAt = new Date(Date.now() + (tokenData.expires_in || 3600) * 1000)
+        const { encrypt } = await import('./services/encryptionService.js')
+        await pool.query(
+          'UPDATE ocbc_connections SET access_token = $1, expires_at = $2 WHERE user_id = $3',
+          [encrypt(accessToken), expiresAt, req.user.id]
+        )
+      }
+
+      // OCBC Account Information — path may vary; check your portal docs
+      const accountsRes = await axios.get(`${OCBC_API_BASE}/v1/accounts`, {
+        headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' },
+        timeout: 15000,
+      })
+      res.json(accountsRes.data)
+    } catch (err) {
+      console.error('[OCBC accounts]', err.response?.data || err.message)
+      res.status(err.response?.status || 500).json({ error: err.response?.data?.message || err.message })
+    }
+  })
+
+  app.get('/api/ocbc/status', requireAuth, async (req, res) => {
+    const { rows } = await pool.query(
+      'SELECT connected_at, expires_at FROM ocbc_connections WHERE user_id = $1',
+      [req.user.id]
+    )
+    res.json({ connected: rows.length > 0, connectedAt: rows[0]?.connected_at, expiresAt: rows[0]?.expires_at })
+  })
+
+  app.delete('/api/ocbc/connection', requireAuth, async (req, res) => {
+    await pool.query('DELETE FROM ocbc_connections WHERE user_id = $1', [req.user.id])
+    res.status(204).end()
+  })
+
   // ── SGFinDex / MyInfo ─────────────────────────────────────────
   app.get('/api/singpass/auth-url', requireAuth, async (req, res) => {
     const appId = process.env.MYINFO_APP_ID

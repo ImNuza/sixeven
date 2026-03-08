@@ -194,5 +194,22 @@ export async function sendChatMessage(messages, portfolioContext = null) {
   })
 }
 
+// ── OCBC Open API ─────────────────────────────────────────────
+export async function connectOcbc() {
+  return request('/api/ocbc/connect', { method: 'POST' })
+}
+
+export async function fetchOcbcAccounts() {
+  return request('/api/ocbc/accounts')
+}
+
+export async function fetchOcbcStatus() {
+  return request('/api/ocbc/status')
+}
+
+export async function disconnectOcbc() {
+  return request('/api/ocbc/connection', { method: 'DELETE' })
+}
+
 // ── Plaid / SGFinDex endpoints kept server-side for production integration ──
 // BankPanel and SingpassPanel use local mock data for prototype demo

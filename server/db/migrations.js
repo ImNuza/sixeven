@@ -134,6 +134,17 @@ export const schema = `
     data JSONB NOT NULL DEFAULT '{}',
     fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
+
+  CREATE TABLE IF NOT EXISTS ocbc_connections (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE UNIQUE,
+    access_token TEXT NOT NULL,
+    refresh_token TEXT,
+    expires_at TIMESTAMPTZ,
+    connected_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_ocbc_connections_user ON ocbc_connections (user_id);
 `
 
 export async function ensureSystemSeedUser(client) {
