@@ -3,5 +3,5 @@ import dotenv from 'dotenv'
 
 dotenv.config()
 
-export const pool = createPool()
+export const pool = await createPool()
 export { DB_TYPE }

@@ -7,6 +7,7 @@ import AddAsset from './pages/AddAsset'
 import Insights from './pages/Insights'
 import Account from './pages/Account'
 import Onboarding from './pages/Onboarding'
+import Markets from './pages/Markets'
 import ProtectedRoute from './components/ProtectedRoute'
 
 export default function App() {
@@ -22,6 +23,7 @@ export default function App() {
             <Route path="/connect" element={<Navigate to="/account" replace />} />
             <Route path="/add" element={<AddAsset />} />
             <Route path="/insights" element={<Insights />} />
+            <Route path="/markets" element={<Markets />} />
             <Route path="/account" element={<Account />} />
           </Route>
         </Route>

@@ -1,6 +1,5 @@
 import { hashPassword, signAuthToken, verifyPassword } from './authService.js'
 import { encrypt, decrypt, hmacLookup } from './encryptionService.js'
-import { seedStarterPortfolio } from '../db/seedData.js'
 
 function sanitizeUser(user) {
   // email column stores AES-256-GCM ciphertext; decrypt transparently (plaintext passthrough for legacy rows)
@@ -96,7 +95,6 @@ export async function createUserAccount(pool, { username, password, email }) {
       [trimmedUsername, encryptedEmail, emailHmac, passwordHash]
     )
 
-    await seedStarterPortfolio(client, rows[0].id)
     await client.query('COMMIT')
 
     const user = sanitizeUser(rows[0])

@@ -716,6 +716,133 @@ HARD RULES:
     }
   })
 
+  // ── Markets (public data, auth required to prevent abuse) ────
+  const INDICES = [
+    { ticker: '^GSPC',  label: 'S&P 500',   region: 'US' },
+    { ticker: '^IXIC',  label: 'Nasdaq',     region: 'US' },
+    { ticker: '^HSI',   label: 'HSI',        region: 'HK' },
+    { ticker: '^N225',  label: 'Nikkei',     region: 'JP' },
+    { ticker: '^FTSE',  label: 'FTSE 100',   region: 'GB' },
+    { ticker: '^AXJO',  label: 'ASX 200',    region: 'AU' },
+    { ticker: '^STI',   label: 'STI',        region: 'SG' },
+    { ticker: '^DJI',   label: 'Dow Jones',  region: 'US' },
+  ]
+  const WATCHLIST_STOCKS = [
+    { ticker: 'AAPL',  label: 'Apple',     sector: 'Tech' },
+    { ticker: 'MSFT',  label: 'Microsoft', sector: 'Tech' },
+    { ticker: 'NVDA',  label: 'NVIDIA',    sector: 'Tech' },
+    { ticker: 'GOOGL', label: 'Alphabet',  sector: 'Tech' },
+    { ticker: 'AMZN',  label: 'Amazon',    sector: 'Tech' },
+    { ticker: 'TSLA',  label: 'Tesla',     sector: 'Auto' },
+    { ticker: 'META',  label: 'Meta',      sector: 'Tech' },
+    { ticker: 'ES3.SI',label: 'STI ETF',   sector: 'ETF'  },
+  ]
+  const CRYPTO_IDS = ['bitcoin','ethereum','solana','binancecoin','ripple','cardano','polkadot']
+  const CRYPTO_MAP = { bitcoin: 'BTC', ethereum: 'ETH', solana: 'SOL', binancecoin: 'BNB', ripple: 'XRP', cardano: 'ADA', polkadot: 'DOT' }
+
+  // Simple in-memory cache (TTL: 3 min for overview, 10 min for chart)
+  const mktCache = new Map()
+  function mktCached(key, ttlMs, fetcher) {
+    const hit = mktCache.get(key)
+    if (hit && Date.now() - hit.ts < ttlMs) return Promise.resolve(hit.data)
+    return fetcher().then(data => { mktCache.set(key, { data, ts: Date.now() }); return data })
+  }
+
+  async function yahooQuote(ticker) {
+    try {
+      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=5d`
+      const { data } = await axios.get(url, { timeout: 8000, headers: { 'User-Agent': 'Mozilla/5.0' } })
+      const meta = data?.chart?.result?.[0]?.meta
+      if (!meta) return null
+      const prev = meta.chartPreviousClose || meta.previousClose || 0
+      const price = meta.regularMarketPrice || 0
+      const change = price - prev
+      const changePct = prev ? (change / prev) * 100 : 0
+      return { price, prev, change, changePct, volume: meta.regularMarketVolume || 0, marketCap: meta.marketCap || null, currency: meta.currency || 'USD' }
+    } catch { return null }
+  }
+
+  async function yahooHistory(ticker, range = '1mo', interval = '1d') {
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=${interval}&range=${range}`
+    const { data } = await axios.get(url, { timeout: 10000, headers: { 'User-Agent': 'Mozilla/5.0' } })
+    const result = data?.chart?.result?.[0]
+    if (!result) return []
+    const { timestamp, indicators } = result
+    const quote = indicators?.quote?.[0]
+    if (!timestamp || !quote) return []
+    return timestamp.map((ts, i) => ({
+      t: ts * 1000,
+      o: quote.open?.[i] ?? null,
+      h: quote.high?.[i] ?? null,
+      l: quote.low?.[i] ?? null,
+      c: quote.close?.[i] ?? null,
+      v: quote.volume?.[i] ?? null,
+    })).filter(p => p.c !== null)
+  }
+
+  app.get('/api/markets/overview', requireAuth, async (req, res) => {
+    try {
+      const data = await mktCached('overview', 3 * 60 * 1000, async () => {
+        const [indicesRaw, cryptoRaw, stocksRaw] = await Promise.all([
+          Promise.all(INDICES.map(async idx => {
+            const q = await yahooQuote(idx.ticker)
+            return q ? { ...idx, ...q } : { ...idx, price: 0, change: 0, changePct: 0 }
+          })),
+          (async () => {
+            try {
+              const ids = CRYPTO_IDS.join(',')
+              const { data } = await axios.get(`https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd&include_24hr_change=true&include_market_cap=true&include_24hr_vol=true`, { timeout: 8000 })
+              return CRYPTO_IDS.map(id => ({
+                ticker: CRYPTO_MAP[id],
+                label: id.charAt(0).toUpperCase() + id.slice(1),
+                coinId: id,
+                price: data[id]?.usd || 0,
+                changePct: data[id]?.usd_24h_change || 0,
+                change: 0,
+                marketCap: data[id]?.usd_market_cap || null,
+                volume: data[id]?.usd_24h_vol || null,
+                currency: 'USD',
+              }))
+            } catch { return [] }
+          })(),
+          Promise.all(WATCHLIST_STOCKS.map(async s => {
+            const q = await yahooQuote(s.ticker)
+            return q ? { ...s, ...q } : { ...s, price: 0, change: 0, changePct: 0 }
+          })),
+        ])
+        return { indices: indicesRaw, crypto: cryptoRaw, stocks: stocksRaw, updatedAt: new Date().toISOString() }
+      })
+      res.json(data)
+    } catch (err) {
+      res.status(500).json({ error: err.message })
+    }
+  })
+
+  app.get('/api/markets/chart/:ticker', requireAuth, async (req, res) => {
+    const { ticker } = req.params
+    const range = ['1d','5d','1mo','3mo','6mo','1y','2y','5y'].includes(req.query.range) ? req.query.range : '1mo'
+    const interval = range === '1d' ? '5m' : range === '5d' ? '15m' : '1d'
+    const cacheKey = `chart:${ticker}:${range}`
+    const ttl = range === '1d' ? 2 * 60 * 1000 : 10 * 60 * 1000
+    try {
+      const candles = await mktCached(cacheKey, ttl, () => yahooHistory(ticker, range, interval))
+      res.json({ ticker, range, interval, candles })
+    } catch (err) {
+      res.status(500).json({ error: err.message })
+    }
+  })
+
+  app.get('/api/markets/quote/:ticker', requireAuth, async (req, res) => {
+    const { ticker } = req.params
+    try {
+      const q = await mktCached(`quote:${ticker}`, 60 * 1000, () => yahooQuote(ticker))
+      if (!q) return res.status(404).json({ error: 'Quote not found' })
+      res.json({ ticker, ...q })
+    } catch (err) {
+      res.status(500).json({ error: err.message })
+    }
+  })
+
   // Purge expired revoked tokens every hour — keeps the denylist table small
   setInterval(async () => {
     try {

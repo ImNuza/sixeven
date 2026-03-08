@@ -194,6 +194,19 @@ export async function sendChatMessage(messages, portfolioContext = null) {
   })
 }
 
+// ── Markets ───────────────────────────────────────────────────
+export async function fetchMarketsOverview() {
+  return request('/api/markets/overview')
+}
+
+export async function fetchMarketChart(ticker, range = '1mo') {
+  return request(`/api/markets/chart/${encodeURIComponent(ticker)}?range=${range}`)
+}
+
+export async function fetchMarketQuote(ticker) {
+  return request(`/api/markets/quote/${encodeURIComponent(ticker)}`)
+}
+
 // ── OCBC Open API ─────────────────────────────────────────────
 export async function connectOcbc() {
   return request('/api/ocbc/connect', { method: 'POST' })

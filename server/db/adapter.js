@@ -5,7 +5,6 @@
  * Automatically falls back to SQLite when DATABASE_URL is not set.
  */
 
-import Database from 'better-sqlite3'
 import pg from 'pg'
 import path from 'path'
 import fs from 'fs'
@@ -189,7 +188,7 @@ class SQLiteClient {
 }
 
 class SQLitePool {
-  constructor(dbPath) {
+  constructor(dbPath, Database) {
     this.dbPath = dbPath
     this.db = new Database(dbPath)
     this.db.pragma('journal_mode = WAL')
@@ -237,17 +236,18 @@ class PostgresPool {
 
 // ── Factory ────────────────────────────────────────────────────
 
-export function createPool() {
+export async function createPool() {
   if (DB_TYPE === 'postgres') {
     return new PostgresPool(process.env.DATABASE_URL)
   } else {
+    const { default: Database } = await import('better-sqlite3')
     const dbPath = process.env.SQLITE_PATH || path.join(__dirname, '..', 'data', 'safeseven.db')
     // Ensure data directory exists
     const dataDir = path.dirname(dbPath)
     if (!fs.existsSync(dataDir)) {
       fs.mkdirSync(dataDir, { recursive: true })
     }
-    return new SQLitePool(dbPath)
+    return new SQLitePool(dbPath, Database)
   }
 }
 
