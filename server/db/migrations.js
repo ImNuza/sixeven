@@ -83,6 +83,36 @@ export const schema = `
 
   CREATE INDEX IF NOT EXISTS idx_wallet_connections_user ON wallet_connections (user_id);
 
+  -- email_hmac: deterministic HMAC for uniqueness lookups without decrypting the table
+  ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS email_hmac VARCHAR(64);
+
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_hmac ON users (email_hmac)
+    WHERE email_hmac IS NOT NULL;
+
+  -- revoked_tokens: token denylist — populated on logout / password change
+  CREATE TABLE IF NOT EXISTS revoked_tokens (
+    jti VARCHAR(64) PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    expires_at TIMESTAMPTZ NOT NULL,
+    revoked_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_revoked_tokens_expires ON revoked_tokens (expires_at);
+
+  -- audit_log: immutable record of sensitive operations
+  CREATE TABLE IF NOT EXISTS audit_log (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER,
+    action VARCHAR(80) NOT NULL,
+    ip VARCHAR(45),
+    user_agent TEXT,
+    meta JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_audit_log_user_created ON audit_log (user_id, created_at DESC);
+
   CREATE TABLE IF NOT EXISTS plaid_items (
     id SERIAL PRIMARY KEY,
     user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,

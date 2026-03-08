@@ -13,8 +13,8 @@
   --app-text-soft: rgba(255, 255, 255, 0.62);
   --app-text-muted: rgba(255, 255, 255, 0.38);
   --app-shadow: 0 24px 60px rgba(3, 8, 24, 0.28);
-  --app-accent: #2f7cf6;
-  --app-accent-soft: rgba(47, 124, 246, 0.12);
+  --app-accent: #C9A84C;
+  --app-accent-soft: rgba(201, 168, 76, 0.12);
   --app-success: #18a871;
   --app-warning: #f0a100;
   --app-danger: #e65054;
@@ -50,7 +50,7 @@ html[data-theme='light'] {
 
   body {
     background:
-      radial-gradient(circle at top, rgba(47, 124, 246, 0.14), transparent 28%),
+      radial-gradient(circle at top, rgba(201, 168, 76, 0.08), transparent 28%),
       linear-gradient(180deg, var(--app-bg) 0%, color-mix(in srgb, var(--app-bg) 94%, black) 100%);
     color: var(--app-text);
     font-family: 'SF Pro Display', 'SF Pro Text', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
@@ -96,8 +96,9 @@ html[data-theme='light'] {
   .app-shell {
     min-height: 100vh;
     background:
-      radial-gradient(circle at top right, color-mix(in srgb, var(--app-accent) 12%, transparent), transparent 26%),
-      linear-gradient(180deg, var(--app-bg) 0%, color-mix(in srgb, var(--app-bg) 94%, black) 100%);
+      radial-gradient(ellipse at top right, color-mix(in srgb, var(--app-accent) 8%, transparent), transparent 30%),
+      radial-gradient(ellipse at bottom left, rgba(47, 80, 140, 0.12), transparent 40%),
+      linear-gradient(180deg, var(--app-bg) 0%, color-mix(in srgb, var(--app-bg) 96%, black) 100%);
   }
 
   .app-sidebar {
@@ -182,7 +183,11 @@ html[data-theme='light'] {
   }
 
   .glow-blue {
-    box-shadow: 0 24px 50px rgba(47, 124, 246, 0.18);
+    box-shadow: 0 24px 50px rgba(201, 168, 76, 0.18);
+  }
+
+  .glow-gold {
+    box-shadow: 0 24px 50px rgba(201, 168, 76, 0.22);
   }
 
   .glow-green {
@@ -190,7 +195,7 @@ html[data-theme='light'] {
   }
 
   .gradient-text {
-    background: linear-gradient(135deg, var(--app-accent), color-mix(in srgb, var(--app-accent) 40%, #71d0ff));
+    background: linear-gradient(135deg, var(--app-accent), color-mix(in srgb, var(--app-accent) 55%, #fff8e0));
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
@@ -246,6 +251,22 @@ html[data-theme='light'] {
   html[data-theme='light'] .bg-white\/\[0\.08\] {
     background: color-mix(in srgb, var(--app-surface) 94%, transparent) !important;
   }
+}
+
+/* ── Protocol section canvas animations ─────────────────────── */
+@keyframes spin-cw  { to { transform: rotate(360deg);  } }
+@keyframes spin-ccw { to { transform: rotate(-360deg); } }
+@keyframes ekg-draw {
+  from { stroke-dashoffset: 600; }
+  to   { stroke-dashoffset: 0;   }
+}
+@keyframes scan-x {
+  0%   { transform: translateX(-4px);   }
+  100% { transform: translateX(240px);  }
+}
+@keyframes proto-pulse {
+  0%, 100% { opacity: 0.6; transform: scale(1); }
+  50%       { opacity: 1;   transform: scale(1.08); }
 }
 
 /* ── Atom orbit keyframes ────────────────────────────────────── */

@@ -1,5 +1,8 @@
 import express from 'express'
 import cors from 'cors'
+import helmet from 'helmet'
+import cookieParser from 'cookie-parser'
+import { rateLimit } from 'express-rate-limit'
 import axios from 'axios'
 import crypto from 'crypto'
 import { SignJWT, importPKCS8 } from 'jose'
@@ -80,8 +83,10 @@ export function createApp({
   const assetsController = createAssetsController({ pool, recordNetWorthSnapshot })
   const requireAuth = createAuthMiddleware({
     getUserById: (id) => getUserById(pool, id),
+    pool,
   })
   const authController = createAuthController({
+    pool,
     createUserAccount: (payload) => createUserAccount(pool, payload),
     authenticateAccount: (payload) => authenticateAccount(pool, payload),
     getUserById: (id) => getUserById(pool, id),
@@ -90,27 +95,72 @@ export function createApp({
     updateProfile: (id, payload) => updateProfile(pool, id, payload),
   })
 
-  app.use(cors())
-  app.use(express.json())
+  // ── Security headers (Helmet) ── industry standard for fintech ──
+  app.use(helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", 'data:', 'https:'],
+        connectSrc: ["'self'"],
+        frameSrc: ["'none'"],
+        objectSrc: ["'none'"],
+      },
+    },
+    hsts: { maxAge: 31536000, includeSubDomains: true, preload: true },
+    referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+    xFrameOptions: { action: 'deny' },
+  }))
+
+  app.use(cors({
+    origin: process.env.CLIENT_URL || 'http://localhost:5173',
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+  }))
+
+  app.use(cookieParser())
+  app.use(express.json({ limit: '100kb' })) // prevent large payload attacks
+
+  // ── Rate limiting ─────────────────────────────────────────────
+  // Auth endpoints: strict (10 attempts / 15 min) — brute-force protection
+  const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many attempts. Please wait 15 minutes before trying again.' },
+  })
+
+  // General API: relaxed (300 req / min)
+  const apiLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 300,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many requests. Please slow down.' },
+  })
+
+  app.use('/api/', apiLimiter)
 
   app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', service: 'safeseven-api' })
   })
 
-  app.post('/api/auth/register', authController.register)
-  app.post('/api/auth/login', authController.login)
+  app.post('/api/auth/register', authLimiter, authController.register)
+  app.post('/api/auth/login', authLimiter, authController.login)
+  app.post('/api/auth/logout', requireAuth, authController.logout)
   app.get('/api/auth/me', requireAuth, authController.me)
   app.put('/api/auth/profile', requireAuth, authController.updateProfile)
   app.put('/api/auth/password', requireAuth, authController.updatePassword)
   app.delete('/api/auth/account', requireAuth, authController.removeAccount)
 
-  app.get('/api/assets', requireAuth, async (req, res) => {
-    try {
-      await ensureFreshPrices(req.user.id)
-      return assetsController.listAssets(req, res)
-    } catch (error) {
-      return res.status(500).json({ error: error.message })
-    }
+  app.get('/api/assets', requireAuth, (req, res) => {
+    // Fire-and-forget: refresh prices in background so the response
+    // is not blocked by slow external calls (Yahoo Finance / CoinGecko).
+    ensureFreshPrices(req.user.id).catch(() => {})
+    return assetsController.listAssets(req, res)
   })
   app.post('/api/assets', requireAuth, assetsController.createAsset)
   app.put('/api/assets/:id', requireAuth, assetsController.updateAsset)
@@ -118,7 +168,7 @@ export function createApp({
 
   app.get('/api/portfolio/summary', requireAuth, async (req, res) => {
     try {
-      await ensureFreshPrices(req.user.id)
+      ensureFreshPrices(req.user.id).catch(() => {})
       const summary = await getPortfolioSummary(req.user.id)
       res.json(summary)
     } catch (err) {
@@ -128,7 +178,7 @@ export function createApp({
 
   app.get('/api/portfolio/history', requireAuth, async (req, res) => {
     try {
-      await ensureFreshPrices(req.user.id)
+      ensureFreshPrices(req.user.id).catch(() => {})
       const history = await getPortfolioHistory(req.user.id)
       res.json(history)
     } catch (err) {
@@ -143,36 +193,62 @@ export function createApp({
       if (!Array.isArray(messages) || messages.length === 0) {
         return res.status(400).json({ error: 'messages array required' })
       }
+      // Sanitize: enforce types, cap message length, limit history depth
+      const MAX_MSG_LEN = 2000
+      const safeMessages = messages.slice(-20).map(m => ({
+        role: ['user', 'assistant', 'system'].includes(m.role) ? m.role : 'user',
+        content: String(m.content || '').slice(0, MAX_MSG_LEN),
+      }))
       const apiKey = process.env.FEATHERLESS_API_KEY
       if (!apiKey) return res.status(503).json({ error: 'AI service not configured' })
 
       const { default: OpenAI } = await import('openai')
       const openai = new OpenAI({ baseURL: 'https://api.featherless.ai/v1', apiKey })
 
+      // Guard: reject clearly off-topic messages before hitting the model
+      const lastUserMsg = [...safeMessages].reverse().find(m => m.role === 'user')?.content?.toLowerCase() || ''
+      const offTopicPatterns = [
+        /\b(recipe|cook|sport|weather|movie|music|game|dating|travel|holiday|joke|poem|song|code|programming|hack|politic|religion|celebrity|gossip)\b/,
+      ]
+      if (offTopicPatterns.some(p => p.test(lastUserMsg)) && !/\b(portfolio|invest|stock|fund|cpf|asset|wealth|money|finance|saving|budget|debt|return|dividend|crypto|sgd|market|risk|retire)\b/.test(lastUserMsg)) {
+        return res.json({ reply: "I'm WealthAI — I'm only able to help with personal finance, investing, and wealth wellness topics. Try asking me about your portfolio, savings strategy, CPF, or how to improve your wellness score." })
+      }
+
       const systemMessages = [
         {
           role: 'system',
-          content: `You are WealthAI, a personal financial wellness advisor embedded in SafeSeven — a wealth management app for NTU FinTech Hackathon 2026 (Schroders Wealth Wellness Hub).
-Your role: help users understand their financial health, interpret their portfolio data, and give actionable steps to improve their wealth wellness score.
-Guidelines:
-- Be warm, clear, and human — avoid overly formal language
-- Always ground advice in the user's actual portfolio data when provided
-- Focus on Singapore financial context (CPF, SGX, SGD, MAS guidelines) but handle global assets too
-- Never give specific "buy/sell X stock" advice; instead give principles and frameworks
-- Keep responses concise and scannable (use bullet points for action steps)
-- If unsure about a fact, say so — never fabricate numbers`,
+          content: `You are WealthAI, a specialist personal finance and wealth wellness advisor embedded in SafeSeven — a Singapore-focused wealth management app built for NTU FinTech Hackathon 2026 (Schroders Wealth Wellness Hub).
+
+SCOPE — You ONLY discuss topics within this list. Politely refuse anything outside it:
+• Portfolio analysis and asset allocation
+• Investment principles (stocks, ETFs, bonds, REITs, crypto, commodities, property)
+• Singapore-specific finance: CPF (OA/SA/MA/RA), SRS, SGX, MAS regulations, SSBs, T-bills
+• Wealth wellness scoring: diversification, liquidity, emergency funds, debt management
+• Personal budgeting, savings rate, net worth tracking
+• Retirement and financial independence planning
+• Risk management and insurance (general principles only)
+• Interpreting the user's SafeSeven portfolio data
+
+HARD RULES:
+1. If the user asks about anything outside the scope above (politics, entertainment, coding, recipes, sports, personal relationships, etc.), respond ONLY with: "I'm focused on financial wellness topics. Ask me about your portfolio, investments, CPF, or wealth strategy instead."
+2. Never give specific "buy/sell [ticker]" instructions — give principles and frameworks instead.
+3. Never fabricate numbers, rates, or regulatory facts. If uncertain, say so and recommend official sources (MAS, CPF Board, SGX).
+4. Always ground advice in the user's portfolio data when it is provided.
+5. Keep responses concise and scannable — use bullet points for action steps.
+6. Use Singapore context by default (SGD, CPF, MAS guidelines) but handle global assets when relevant.
+7. Add a brief disclaimer when giving any investment-related guidance: "(Not financial advice — consult a licensed advisor for personalised recommendations.)"`,
         },
       ]
 
       if (portfolioContext) {
-        systemMessages.push({ role: 'system', content: `Current portfolio context:\n${portfolioContext}` })
+        systemMessages.push({ role: 'system', content: `User's current portfolio context (use this to personalise all advice):\n${portfolioContext}` })
       }
 
       const completion = await openai.chat.completions.create({
-        model: 'Qwen/Qwen2.5-7B-Instruct',
-        messages: [...systemMessages, ...messages],
-        max_tokens: 600,
-        temperature: 0.7,
+        model: 'perplexity-ai/r1-1776-distill-llama-70b',
+        messages: [...systemMessages, ...safeMessages],
+        max_tokens: 700,
+        temperature: 0.4,
       })
 
       res.json({ reply: completion.choices[0].message.content })
@@ -183,7 +259,7 @@ Guidelines:
 
   app.get('/api/insights', requireAuth, async (req, res) => {
     try {
-      await ensureFreshPrices(req.user.id)
+      ensureFreshPrices(req.user.id).catch(() => {})
       const payload = await getInsightsPayload({
         pool,
         userId: req.user.id,
@@ -207,7 +283,7 @@ Guidelines:
 
   app.get('/api/prices', requireAuth, async (req, res) => {
     try {
-      await ensureFreshPrices(req.user.id)
+      ensureFreshPrices(req.user.id).catch(() => {})
       const { rows } = await pool.query(
         `SELECT DISTINCT pc.*
          FROM price_cache pc
@@ -541,6 +617,15 @@ Guidelines:
       res.status(500).json({ error: err.message })
     }
   })
+
+  // Purge expired revoked tokens every hour — keeps the denylist table small
+  setInterval(async () => {
+    try {
+      await pool.query('DELETE FROM revoked_tokens WHERE expires_at < NOW()')
+    } catch (err) {
+      console.error('[cleanup] Revoked token purge failed:', err.message)
+    }
+  }, 60 * 60 * 1000)
 
   return app
 }

@@ -4,9 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "predev": "(lsof -ti :3001; lsof -ti :5173) | xargs kill -9 2>/dev/null || true",
     "dev": "concurrently \"npm run dev:client\" \"npm run dev:server\"",
     "dev:client": "cd client && npm run dev",
-    "dev:server": "cd server && npm run dev"
+    "dev:server": "cd server && npm run dev",
+    "audit:all": "npm audit --audit-level=high && cd client && npm audit --audit-level=high && cd ../server && npm audit --audit-level=high"
   },
   "devDependencies": {
     "concurrently": "^9.1.0"

@@ -1,11 +1,14 @@
 import { hashPassword, signAuthToken, verifyPassword } from './authService.js'
+import { encrypt, decrypt, hmacLookup } from './encryptionService.js'
 import { seedStarterPortfolio } from '../db/seedData.js'
 
 function sanitizeUser(user) {
+  // email column stores AES-256-GCM ciphertext; decrypt transparently (plaintext passthrough for legacy rows)
+  const rawEmail = user.email ? decrypt(user.email) : null
   return {
     id: Number(user.id),
     username: user.username,
-    email: user.email || null,
+    email: rawEmail || null,
     createdAt: user.created_at,
   }
 }
@@ -71,9 +74,10 @@ export async function createUserAccount(pool, { username, password, email }) {
 
     const normalizedEmail = normalizeEmail(email)
     if (normalizedEmail) {
+      const emailHmac = hmacLookup(normalizedEmail)
       const emailExisting = await client.query(
-        'SELECT id FROM users WHERE email = $1',
-        [normalizedEmail]
+        'SELECT id FROM users WHERE email_hmac = $1',
+        [emailHmac]
       )
       if (emailExisting.rows.length) {
         const error = new Error('Email is already in use.')
@@ -83,11 +87,13 @@ export async function createUserAccount(pool, { username, password, email }) {
     }
 
     const passwordHash = await hashPassword(password)
+    const encryptedEmail = normalizedEmail ? encrypt(normalizedEmail) : null
+    const emailHmac = normalizedEmail ? hmacLookup(normalizedEmail) : null
     const { rows } = await client.query(
-      `INSERT INTO users (username, email, password_hash)
-       VALUES ($1, $2, $3)
+      `INSERT INTO users (username, email, email_hmac, password_hash)
+       VALUES ($1, $2, $3, $4)
        RETURNING id, username, email, created_at`,
-      [trimmedUsername, normalizedEmail, passwordHash]
+      [trimmedUsername, encryptedEmail, emailHmac, passwordHash]
     )
 
     await seedStarterPortfolio(client, rows[0].id)
@@ -191,9 +197,10 @@ export async function updateProfile(pool, userId, { email }) {
   }
 
   if (normalizedEmail) {
+    const emailHmac = hmacLookup(normalizedEmail)
     const { rows } = await pool.query(
-      'SELECT id FROM users WHERE email = $1 AND id <> $2',
-      [normalizedEmail, userId]
+      'SELECT id FROM users WHERE email_hmac = $1 AND id <> $2',
+      [emailHmac, userId]
     )
     if (rows.length) {
       const error = new Error('Email is already in use.')
@@ -202,12 +209,14 @@ export async function updateProfile(pool, userId, { email }) {
     }
   }
 
+  const encryptedEmail = normalizedEmail ? encrypt(normalizedEmail) : null
+  const emailHmac = normalizedEmail ? hmacLookup(normalizedEmail) : null
   const { rows } = await pool.query(
     `UPDATE users
-     SET email = $1
-     WHERE id = $2
+     SET email = $1, email_hmac = $2
+     WHERE id = $3
      RETURNING id, username, email, created_at`,
-    [normalizedEmail, userId]
+    [encryptedEmail, emailHmac, userId]
   )
 
   return {

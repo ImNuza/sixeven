@@ -6,6 +6,7 @@ const MODES = [
   { key: 'position', label: 'Position Value' },
   { key: 'return', label: 'P&L Calculator' },
   { key: 'compound', label: 'Growth Projection' },
+  { key: 'cpf', label: 'CPF Planner' },
 ]
 
 function formatSGD(value) {
@@ -92,6 +93,67 @@ function CompoundCalc() {
   )
 }
 
+// CPF interest rates (p.a.)
+const CPF_RATES = { OA: 0.025, SA: 0.04, MA: 0.04 }
+
+function cpfProject(oa, sa, ma, monthlyOA, monthlySA, monthlyMA, years) {
+  let oaBal = oa, saBal = sa, maBal = ma
+  for (let y = 0; y < years; y++) {
+    oaBal = (oaBal + monthlyOA * 12) * (1 + CPF_RATES.OA)
+    saBal = (saBal + monthlySA * 12) * (1 + CPF_RATES.SA)
+    maBal = (maBal + monthlyMA * 12) * (1 + CPF_RATES.MA)
+  }
+  return { oaBal, saBal, maBal, total: oaBal + saBal + maBal }
+}
+
+function CPFCalc() {
+  const [oaBalance, setOaBalance] = useState('')
+  const [saBalance, setSaBalance] = useState('')
+  const [maBalance, setMaBalance] = useState('')
+  const [monthlyOA, setMonthlyOA] = useState('')
+  const [monthlySA, setMonthlySA] = useState('')
+  const [monthlyMA, setMonthlyMA] = useState('')
+  const [years, setYears] = useState('10')
+
+  const n = Math.max(0, parseInt(years) || 0)
+  const result = cpfProject(
+    parseFloat(oaBalance) || 0, parseFloat(saBalance) || 0, parseFloat(maBalance) || 0,
+    parseFloat(monthlyOA) || 0, parseFloat(monthlySA) || 0, parseFloat(monthlyMA) || 0,
+    n
+  )
+  // FRS 2025 ≈ SGD 213,000; BRS ≈ SGD 106,500
+  const FRS = 213000
+
+  return (
+    <div className="space-y-4">
+      <p className="text-xs text-white/40 leading-relaxed">Project your CPF balances using official interest rates: OA 2.5%, SA 4%, MA 4% p.a.</p>
+      <div className="grid grid-cols-3 gap-2">
+        <CalcInput label="OA Balance" value={oaBalance} onChange={setOaBalance} placeholder="0" />
+        <CalcInput label="SA Balance" value={saBalance} onChange={setSaBalance} placeholder="0" />
+        <CalcInput label="MA Balance" value={maBalance} onChange={setMaBalance} placeholder="0" />
+      </div>
+      <div className="grid grid-cols-3 gap-2">
+        <CalcInput label="Mthly OA" value={monthlyOA} onChange={setMonthlyOA} placeholder="0" />
+        <CalcInput label="Mthly SA" value={monthlySA} onChange={setMonthlySA} placeholder="0" />
+        <CalcInput label="Mthly MA" value={monthlyMA} onChange={setMonthlyMA} placeholder="0" />
+      </div>
+      <CalcInput label="Projection Years" value={years} onChange={setYears} placeholder="e.g. 10" />
+      <div className="grid grid-cols-2 gap-3">
+        <ResultBox label={`OA in ${n}yr`} value={formatSGD(result.oaBal)} positive />
+        <ResultBox label={`SA in ${n}yr`} value={formatSGD(result.saBal)} positive />
+        <ResultBox label={`MA in ${n}yr`} value={formatSGD(result.maBal)} positive />
+        <ResultBox label="Total CPF" value={formatSGD(result.total)} positive />
+      </div>
+      <div className={`rounded-xl border px-4 py-3 text-xs leading-relaxed ${result.saBal >= FRS ? 'border-emerald-500/20 bg-emerald-500/5 text-emerald-400' : 'border-amber-500/20 bg-amber-500/5 text-amber-400'}`}>
+        {result.saBal >= FRS
+          ? `SA meets FRS (S$${(FRS / 1000).toFixed(0)}k) in ${n} years`
+          : `SA shortfall vs FRS: ${formatSGD(FRS - result.saBal)} — consider voluntary top-ups`
+        }
+      </div>
+    </div>
+  )
+}
+
 function CalcInput({ label, value, onChange, placeholder }) {
   return (
     <label className="block">
@@ -168,6 +230,7 @@ export default function CalculatorModal({ onClose }) {
           {mode === 'position' && <PositionCalc />}
           {mode === 'return' && <ReturnCalc />}
           {mode === 'compound' && <CompoundCalc />}
+          {mode === 'cpf' && <CPFCalc />}
         </div>
       </div>
     </div>,

@@ -4,6 +4,27 @@ import {
   parseAssetListQuery,
   validateAssetPayload,
 } from '../validation/assetsValidation.js'
+import { encrypt, decrypt, encryptJSON, decryptJSON } from '../services/encryptionService.js'
+
+// Sensitive fields encrypted at rest with AES-256-GCM
+// institution — could reveal bank/broker relationships
+// details     — JSONB with account numbers, notes, custom metadata
+function encryptAsset(asset) {
+  return {
+    ...asset,
+    institution: encrypt(asset.institution),
+    details: encryptJSON(asset.details),
+  }
+}
+
+function decryptAsset(row) {
+  if (!row) return row
+  return {
+    ...row,
+    institution: decrypt(row.institution),
+    details: decryptJSON(row.details),
+  }
+}
 
 function normalizeAssetPayload(body = {}) {
   return {
@@ -20,10 +41,7 @@ function normalizeAssetPayload(body = {}) {
 }
 
 function prependUserFilter(whereClause) {
-  if (!whereClause) {
-    return 'WHERE user_id = $1'
-  }
-
+  if (!whereClause) return 'WHERE user_id = $1'
   return whereClause.replace('WHERE', 'WHERE user_id = $1 AND')
 }
 
@@ -42,7 +60,6 @@ export function createAssetsController({ pool, recordNetWorthSnapshot }) {
           `SELECT COUNT(*) AS total FROM assets ${scopedWhereClause}`,
           queryParams
         )
-
         const rowsResult = await pool.query(
           `SELECT * FROM assets ${scopedWhereClause} ${orderClause} LIMIT $${queryParams.length + 1} OFFSET $${queryParams.length + 2}`,
           [...queryParams, filters.pageSize, offset]
@@ -52,22 +69,10 @@ export function createAssetsController({ pool, recordNetWorthSnapshot }) {
         const totalPages = Math.max(1, Math.ceil(total / filters.pageSize))
 
         res.json({
-          items: rowsResult.rows,
-          pagination: {
-            page: filters.page,
-            pageSize: filters.pageSize,
-            total,
-            totalPages,
-          },
-          filters: {
-            search: filters.search,
-            category: filters.category,
-            pricing: filters.pricing,
-          },
-          sorting: {
-            sortBy: filters.sortBy,
-            sortDirection: filters.sortDirection.toLowerCase(),
-          },
+          items: rowsResult.rows.map(decryptAsset),
+          pagination: { page: filters.page, pageSize: filters.pageSize, total, totalPages },
+          filters: { search: filters.search, category: filters.category, pricing: filters.pricing },
+          sorting: { sortBy: filters.sortBy, sortDirection: filters.sortDirection.toLowerCase() },
         })
       } catch (err) {
         res.status(500).json({ error: err.message })
@@ -75,11 +80,10 @@ export function createAssetsController({ pool, recordNetWorthSnapshot }) {
     },
 
     createAsset: async (req, res) => {
-      const { name, category, ticker, value, cost, quantity, date, institution, details } = normalizeAssetPayload(req.body)
-      const errors = validateAssetPayload({ name, category, ticker, value, cost, quantity, date, institution, details })
-      if (errors.length) {
-        return res.status(400).json({ error: errors[0], details: errors })
-      }
+      const raw = normalizeAssetPayload(req.body)
+      const errors = validateAssetPayload(raw)
+      if (errors.length) return res.status(400).json({ error: errors[0], details: errors })
+      const safe = encryptAsset(raw)
 
       const client = await pool.connect()
       try {
@@ -88,11 +92,11 @@ export function createAssetsController({ pool, recordNetWorthSnapshot }) {
           `INSERT INTO assets (user_id, name, category, ticker, value, cost, quantity, date, institution, details)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
            RETURNING *`,
-          [req.user.id, name, category, ticker, value, cost, quantity, date, institution, details]
+          [req.user.id, safe.name, safe.category, safe.ticker, safe.value, safe.cost, safe.quantity, safe.date, safe.institution, safe.details]
         )
         await recordNetWorthSnapshot(req.user.id, 'asset_create', client)
         await client.query('COMMIT')
-        res.status(201).json(rows[0])
+        res.status(201).json(decryptAsset(rows[0]))
       } catch (err) {
         await client.query('ROLLBACK')
         res.status(500).json({ error: err.message })
@@ -102,12 +106,10 @@ export function createAssetsController({ pool, recordNetWorthSnapshot }) {
     },
 
     updateAsset: async (req, res) => {
-      const { id } = req.params
-      const { name, category, ticker, value, cost, quantity, date, institution, details } = normalizeAssetPayload(req.body)
-      const errors = validateAssetPayload({ name, category, ticker, value, cost, quantity, date, institution, details })
-      if (errors.length) {
-        return res.status(400).json({ error: errors[0], details: errors })
-      }
+      const raw = normalizeAssetPayload(req.body)
+      const errors = validateAssetPayload(raw)
+      if (errors.length) return res.status(400).json({ error: errors[0], details: errors })
+      const safe = encryptAsset(raw)
 
       const client = await pool.connect()
       try {
@@ -118,16 +120,15 @@ export function createAssetsController({ pool, recordNetWorthSnapshot }) {
                quantity=$6, date=$7, institution=$8, details=$9
            WHERE id=$10 AND user_id=$11
            RETURNING *`,
-          [name, category, ticker, value, cost, quantity, date, institution, details, id, req.user.id]
+          [safe.name, safe.category, safe.ticker, safe.value, safe.cost, safe.quantity, safe.date, safe.institution, safe.details, req.params.id, req.user.id]
         )
         if (!rows.length) {
           await client.query('ROLLBACK')
           return res.status(404).json({ error: 'Asset not found' })
         }
-
         await recordNetWorthSnapshot(req.user.id, 'asset_update', client)
         await client.query('COMMIT')
-        res.json(rows[0])
+        res.json(decryptAsset(rows[0]))
       } catch (err) {
         await client.query('ROLLBACK')
         res.status(500).json({ error: err.message })
@@ -148,7 +149,6 @@ export function createAssetsController({ pool, recordNetWorthSnapshot }) {
           await client.query('ROLLBACK')
           return res.status(404).json({ error: 'Asset not found' })
         }
-
         await recordNetWorthSnapshot(req.user.id, 'asset_delete', client)
         await client.query('COMMIT')
         res.status(204).send()

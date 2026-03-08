@@ -6,6 +6,7 @@ import Assets from './pages/Assets'
 import AddAsset from './pages/AddAsset'
 import Insights from './pages/Insights'
 import Account from './pages/Account'
+import Onboarding from './pages/Onboarding'
 import ProtectedRoute from './components/ProtectedRoute'
 
 export default function App() {
@@ -13,6 +14,7 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<Landing />} />
+        <Route path="/onboarding" element={<Onboarding />} />
         <Route element={<ProtectedRoute />}>
           <Route element={<Layout />}>
             <Route path="/dashboard" element={<Dashboard />} />

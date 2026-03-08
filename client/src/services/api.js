@@ -1,11 +1,10 @@
-import { clearStoredSession, getStoredToken } from '../auth/storage.js'
+import { clearStoredSession } from '../auth/storage.js'
 
 async function request(path, options = {}) {
-  const token = getStoredToken()
   const response = await fetch(path, {
+    credentials: 'include', // send httpOnly auth cookie automatically
     headers: {
       'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(options.headers || {}),
     },
     ...options,
@@ -73,6 +72,10 @@ export async function loginUser(payload) {
     method: 'POST',
     body: JSON.stringify(payload),
   })
+}
+
+export async function logoutUser() {
+  return request('/api/auth/logout', { method: 'POST' })
 }
 
 export async function fetchCurrentUser() {

@@ -5,6 +5,7 @@ import {
   deleteAccount as deleteAccountRequest,
   fetchCurrentUser,
   loginUser,
+  logoutUser,
   registerUser,
   updateProfile as updateProfileRequest,
 } from '../services/api.js'
@@ -12,40 +13,29 @@ import {
 const AuthContext = createContext(null)
 
 export function AuthProvider({ children }) {
-  const [session, setSession] = useState(() => loadStoredSession())
+  // Hydrate from localStorage for instant display (user object only — no token)
+  const [session, setSession] = useState(() => {
+    const stored = loadStoredSession()
+    return stored?.user ? stored : null
+  })
   const [isReady, setIsReady] = useState(false)
 
   useEffect(() => {
     let cancelled = false
 
     async function restoreSession() {
-      const stored = loadStoredSession()
-      if (!stored?.token) {
-        if (!cancelled) {
-          setIsReady(true)
-        }
-        return
-      }
-
+      // Always validate against the server — the httpOnly cookie is the real auth signal.
+      // If no cookie exists the request returns 401 and we clear local state.
       try {
         const response = await fetchCurrentUser()
-        const nextSession = {
-          ...stored,
-          user: response.user,
-        }
+        const nextSession = { user: response.user }
         saveStoredSession(nextSession)
-        if (!cancelled) {
-          setSession(nextSession)
-        }
+        if (!cancelled) setSession(nextSession)
       } catch {
         clearStoredSession()
-        if (!cancelled) {
-          setSession(null)
-        }
+        if (!cancelled) setSession(null)
       } finally {
-        if (!cancelled) {
-          setIsReady(true)
-        }
+        if (!cancelled) setIsReady(true)
       }
     }
 
@@ -65,37 +55,37 @@ export function AuthProvider({ children }) {
 
   async function login(credentials) {
     const nextSession = await loginUser(credentials)
-    saveStoredSession(nextSession)
-    setSession(nextSession)
+    const safe = { user: nextSession.user }
+    saveStoredSession(safe)
+    setSession(safe)
     return nextSession
   }
 
   async function register(credentials) {
     const nextSession = await registerUser(credentials)
-    saveStoredSession(nextSession)
-    setSession(nextSession)
+    const safe = { user: nextSession.user }
+    saveStoredSession(safe)
+    setSession(safe)
     return nextSession
   }
 
-  function logout() {
+  async function logout() {
+    try { await logoutUser() } catch { /* best effort — server revokes token */ }
     clearStoredSession()
     setSession(null)
   }
 
   async function changePassword(payload) {
     const nextSession = await changePasswordRequest(payload)
-    saveStoredSession(nextSession)
-    setSession(nextSession)
+    const safe = { user: nextSession.user }
+    saveStoredSession(safe)
+    setSession(safe)
     return nextSession
   }
 
   async function updateProfile(payload) {
     const result = await updateProfileRequest(payload)
-    const nextSession = {
-      ...(loadStoredSession() || {}),
-      token: session?.token || '',
-      user: result.user,
-    }
+    const nextSession = { user: result.user }
     saveStoredSession(nextSession)
     setSession(nextSession)
     return result
@@ -112,8 +102,7 @@ export function AuthProvider({ children }) {
     <AuthContext.Provider
       value={{
         user: session?.user || null,
-        token: session?.token || '',
-        isAuthenticated: Boolean(session?.token),
+        isAuthenticated: Boolean(session?.user),
         isReady,
         login,
         register,
@@ -133,6 +122,5 @@ export function useAuth() {
   if (!value) {
     throw new Error('useAuth must be used within an AuthProvider.')
   }
-
   return value
 }

@@ -10,7 +10,7 @@ export default {
           700: '#151D35',
           600: '#1B2542',
         },
-        accent: '#3B82F6',
+        accent: '#C9A84C',
         positive: '#10B981',
         negative: '#EF4444',
         warning: '#F59E0B',
