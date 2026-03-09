@@ -21,6 +21,7 @@ import { buildPortfolioInsights } from '../data/portfolioInsights.js'
 import ExportMenu from '../components/ExportMenu'
 import { exportDashboardPDF, exportDashboardExcel } from '../utils/exportReport'
 import { useNotify } from '../context/NotificationContext'
+import { useAuth } from '../auth/AuthContext.jsx'
 
 const TIME_RANGES = [
   { label: '1M', months: 1 }, { label: '3M', months: 3 },
@@ -184,6 +185,7 @@ function CustomizePanel({ widgets, onClose, onChange }) {
 // ── Main Dashboard ────────────────────────────────────────────
 export default function Dashboard() {
   const notify = useNotify()
+  const { user } = useAuth()
   const [assets, setAssets] = useState([])
   const [summary, setSummary] = useState(null)
   const [history, setHistory] = useState([])
@@ -211,7 +213,7 @@ export default function Dashboard() {
       }
     }
     load()
-    const id = window.setInterval(() => load(false), 60000)
+    const id = window.setInterval(() => load(false), 30000)
     return () => { cancelled = true; window.clearInterval(id) }
   }, [])
 
@@ -326,6 +328,9 @@ export default function Dashboard() {
       <div className="flex items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold" style={{ color: 'var(--app-text)' }}>Wealth Dashboard</h1>
+          <p className="mt-1 text-sm" style={{ color: 'var(--app-text-muted)' }}>
+            {user?.username ? `Signed in as ${user.username}${user.email ? ` · ${user.email}` : ''}` : 'Your portfolio snapshot'}
+          </p>
           <div className="flex items-center gap-2 mt-1">
             <Clock className="h-3.5 w-3.5" style={{ color: 'var(--app-text-muted)' }} />
             <p className="text-xs" style={{ color: 'var(--app-text-muted)' }}>

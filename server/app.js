@@ -95,6 +95,14 @@ export function createApp({
     updateProfile: (id, payload) => updateProfile(pool, id, payload),
   })
 
+  async function syncUserPrices(userId, maxAgeMinutes = 0.5) {
+    try {
+      await ensureFreshPrices(userId, maxAgeMinutes)
+    } catch {
+      // Serve the most recent cached portfolio data if an upstream quote provider fails.
+    }
+  }
+
   // ── Security headers (Helmet) ── industry standard for fintech ──
   app.use(helmet({
     contentSecurityPolicy: {
@@ -156,10 +164,8 @@ export function createApp({
   app.put('/api/auth/password', requireAuth, authController.updatePassword)
   app.delete('/api/auth/account', requireAuth, authController.removeAccount)
 
-  app.get('/api/assets', requireAuth, (req, res) => {
-    // Fire-and-forget: refresh prices in background so the response
-    // is not blocked by slow external calls (Yahoo Finance / CoinGecko).
-    ensureFreshPrices(req.user.id).catch(() => {})
+  app.get('/api/assets', requireAuth, async (req, res) => {
+    await syncUserPrices(req.user.id)
     return assetsController.listAssets(req, res)
   })
   app.post('/api/assets', requireAuth, assetsController.createAsset)
@@ -168,7 +174,7 @@ export function createApp({
 
   app.get('/api/portfolio/summary', requireAuth, async (req, res) => {
     try {
-      ensureFreshPrices(req.user.id).catch(() => {})
+      await syncUserPrices(req.user.id)
       const summary = await getPortfolioSummary(req.user.id)
       res.json(summary)
     } catch (err) {
@@ -178,7 +184,7 @@ export function createApp({
 
   app.get('/api/portfolio/history', requireAuth, async (req, res) => {
     try {
-      ensureFreshPrices(req.user.id).catch(() => {})
+      await syncUserPrices(req.user.id)
       const history = await getPortfolioHistory(req.user.id)
       res.json(history)
     } catch (err) {
@@ -259,7 +265,7 @@ HARD RULES:
 
   app.get('/api/insights', requireAuth, async (req, res) => {
     try {
-      ensureFreshPrices(req.user.id).catch(() => {})
+      await syncUserPrices(req.user.id)
       const payload = await getInsightsPayload({
         pool,
         userId: req.user.id,
@@ -283,7 +289,7 @@ HARD RULES:
 
   app.get('/api/prices', requireAuth, async (req, res) => {
     try {
-      ensureFreshPrices(req.user.id).catch(() => {})
+      await syncUserPrices(req.user.id, 0.25)
       const { rows } = await pool.query(
         `SELECT DISTINCT pc.*
          FROM price_cache pc

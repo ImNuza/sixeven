@@ -60,26 +60,37 @@ export function AuthProvider({ children }) {
 
   async function login(credentials) {
     explicitAuthRef.current = true
-    const nextSession = await loginUser(credentials)
-    const safe = { user: nextSession.user }
-    saveStoredSession(safe)
-    setSession(safe)
-    setIsReady(true)
-    return nextSession
+    try {
+      const nextSession = await loginUser(credentials)
+      const safe = { user: nextSession.user }
+      saveStoredSession(safe)
+      setSession(safe)
+      setIsReady(true)
+      return nextSession
+    } catch (error) {
+      explicitAuthRef.current = false
+      throw error
+    }
   }
 
   async function register(credentials) {
     explicitAuthRef.current = true
-    const nextSession = await registerUser(credentials)
-    const safe = { user: nextSession.user }
-    saveStoredSession(safe)
-    setSession(safe)
-    setIsReady(true)
-    return nextSession
+    try {
+      const nextSession = await registerUser(credentials)
+      const safe = { user: nextSession.user }
+      saveStoredSession(safe)
+      setSession(safe)
+      setIsReady(true)
+      return nextSession
+    } catch (error) {
+      explicitAuthRef.current = false
+      throw error
+    }
   }
 
   async function logout() {
     try { await logoutUser() } catch { /* best effort — server revokes token */ }
+    explicitAuthRef.current = false
     clearStoredSession()
     setSession(null)
   }
@@ -102,6 +113,7 @@ export function AuthProvider({ children }) {
 
   async function deleteAccount(payload) {
     const result = await deleteAccountRequest(payload)
+    explicitAuthRef.current = false
     clearStoredSession()
     setSession(null)
     return result

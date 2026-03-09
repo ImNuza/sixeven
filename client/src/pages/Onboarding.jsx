@@ -258,6 +258,7 @@ export default function Onboarding() {
   const [answers, setAnswers] = useState({}) // { crypto: '12000', stocks: '', ... }
   const [inputVal, setInputVal] = useState('')
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState('')
   const [visible, setVisible] = useState(true)
 
   const total = QUESTIONS.length
@@ -314,6 +315,7 @@ export default function Onboarding() {
 
   async function goToDashboard() {
     setSaving(true)
+    setSaveError('')
     try {
       const today = new Date().toISOString().slice(0, 10)
       // Category-specific details required by server validation
@@ -327,19 +329,22 @@ export default function Onboarding() {
           .filter(q => parseFloat(answers[q.id]) > 0)
           .map(q =>
             createAsset({
-              name: q.label,
+              name: q.id === 'crypto' || q.id === 'stocks' ? `${q.label} Portfolio` : q.label,
               category: q.category,
               value: parseFloat(answers[q.id]),
               cost: parseFloat(answers[q.id]),
-              quantity: 1,
               date: today,
               institution: 'Onboarding',
               ...(detailsFor[q.category] ? { details: detailsFor[q.category] } : {}),
-            }).catch(() => null)
+            })
           )
       )
-    } catch (_) {}
-    navigate('/dashboard', { replace: true })
+      navigate('/dashboard', { replace: true })
+    } catch (error) {
+      setSaveError(error.message || 'We could not save your onboarding answers. Please try again.')
+    } finally {
+      setSaving(false)
+    }
   }
 
   const Icon = q?.icon
@@ -591,6 +596,9 @@ export default function Onboarding() {
               {saving ? 'Saving…' : 'Here are steps to elevate your wellness health!'}
               {!saving && <ArrowRight size={16} />}
             </button>
+            {saveError && (
+              <p style={{ marginTop: '0.9rem', color: '#fca5a5', fontSize: '0.85rem' }}>{saveError}</p>
+            )}
             <button onClick={back} style={{ marginTop: '1rem', display: 'inline-flex', alignItems: 'center', gap: '0.3rem', background: 'none', border: 'none', color: 'rgba(255,255,255,0.3)', fontSize: '0.8rem', cursor: 'pointer' }}>
               <ChevronLeft size={14} /> Edit my answers
             </button>
