@@ -6,6 +6,7 @@ import { useTheme } from '../theme/ThemeContext.jsx'
 import SingpassPanel from '../components/SingpassPanel'
 import BankPanel from '../components/BankPanel'
 import WalletPanel from '../components/WalletPanel'
+import CexPanel from '../components/CexPanel'
 
 function initialsFor(username) {
   const letters = String(username || 'SS')
@@ -152,6 +153,7 @@ export default function Account() {
             <SingpassPanel onImportDone={handleImportDone} />
             <BankPanel onImportDone={handleImportDone} />
             <WalletPanel onImportDone={handleImportDone} />
+            <CexPanel onImportDone={handleImportDone} />
           </div>
         )}
       </div>

@@ -300,10 +300,10 @@ export default function ScenarioSimulator({ assets }) {
           {/* Factor Changes */}
           <div className="space-y-2">
             <p className="text-[10px] uppercase tracking-wider text-white/30">Factor Impact</p>
-            <div className="grid grid-cols-4 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               {projectedScore.breakdown.map((item, i) => {
                 const current = currentScore.breakdown[i]
-                const delta = item.score - current.score
+                const delta = current ? item.score - current.score : 0
                 return (
                   <div
                     key={item.label}

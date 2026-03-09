@@ -44,6 +44,23 @@ const ACTION_MAP = {
     fail: 'Build your cash buffer — target 6 months of living expenses.',
     pass: 'Emergency fund meets the 6-month target.',
   },
+  Concentration: {
+    fail: 'Your largest single asset exceeds 25% — spread risk across more positions.',
+    pass: 'No single asset dominates the portfolio.',
+  },
+  'Growth Trend': {
+    fail: 'Net worth is declining — review spending or rebalance underperforming assets.',
+    pass: 'Portfolio is growing on a monthly basis.',
+    neutral: 'Not enough history yet to assess growth trend.',
+  },
+  'Income Assets': {
+    fail: 'Consider adding bonds, CPF top-ups, or dividend stocks for passive income.',
+    pass: 'Good allocation to income-generating assets.',
+  },
+  Rebalancing: {
+    fail: 'Allocation has drifted from targets — consider rebalancing.',
+    pass: 'Portfolio is well-aligned with target allocation.',
+  },
 }
 
 export default function Insights() {
@@ -77,7 +94,10 @@ export default function Insights() {
     return () => { cancelled = true; window.clearInterval(id) }
   }, [])
 
-  const { score, breakdown } = useMemo(() => calculateWellnessScore(assets), [assets])
+  const { score, breakdown } = useMemo(
+    () => calculateWellnessScore(assets, { monthlyChangePct: summary?.monthlyChangePct ?? null }),
+    [assets, summary]
+  )
   const healthStatus = useMemo(() => getWellnessStatus(score), [score])
   const insights = useMemo(() => buildPortfolioInsights(assets, summary), [assets, summary])
 
@@ -92,7 +112,7 @@ export default function Insights() {
   }, [breakdown])
 
   const fails = actions.filter((a) => a.status === 'fail')
-  const passes = actions.filter((a) => a.status === 'pass')
+  const passes = actions.filter((a) => a.status === 'pass' || a.status === 'neutral')
 
   useEffect(() => {
     if (!summary) return
@@ -307,32 +327,31 @@ export default function Insights() {
 
       {/* ── Wellness Breakdown ────────────────────────────────── */}
       <div className="glass-card p-6">
-        <p className="app-kicker mb-4">Wellness Breakdown</p>
-        <div className="grid grid-cols-4 gap-4">
-          {breakdown.map((item) => (
-            <div key={item.label} className="space-y-2">
-              <div className="flex items-center justify-between">
-                <p className="text-sm text-white/70">{item.label}</p>
-                <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-                  item.status === 'pass'
-                    ? 'bg-emerald-400/10 text-emerald-400'
-                    : 'bg-red-400/10 text-red-400'
-                }`}>
-                  {item.score}/{item.max}
-                </span>
+        <p className="app-kicker mb-4">Wellness Breakdown — 8 Factors</p>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          {breakdown.map((item) => {
+            const statusColor = item.status === 'pass' ? 'emerald' : item.status === 'neutral' ? 'blue' : 'red'
+            return (
+              <div key={item.label} className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm text-white/70">{item.label}</p>
+                  <span className={`text-xs font-semibold px-2 py-0.5 rounded-full bg-${statusColor}-400/10 text-${statusColor}-400`}>
+                    {item.score}/{item.max}
+                  </span>
+                </div>
+                <div className="h-1.5 rounded-full bg-white/[0.06] overflow-hidden">
+                  <div
+                    className="h-full rounded-full transition-all duration-500"
+                    style={{
+                      width: `${(item.score / item.max) * 100}%`,
+                      backgroundColor: item.status === 'pass' ? '#18a871' : item.status === 'neutral' ? '#2f7cf6' : '#e65054',
+                    }}
+                  />
+                </div>
+                <p className="text-xs text-white/30">{item.detail}</p>
               </div>
-              <div className="h-1.5 rounded-full bg-white/[0.06] overflow-hidden">
-                <div
-                  className="h-full rounded-full transition-all duration-500"
-                  style={{
-                    width: `${(item.score / item.max) * 100}%`,
-                    backgroundColor: item.status === 'pass' ? '#18a871' : '#e65054',
-                  }}
-                />
-              </div>
-              <p className="text-xs text-white/30">{item.detail}</p>
-            </div>
-          ))}
+            )
+          })}
         </div>
       </div>
 

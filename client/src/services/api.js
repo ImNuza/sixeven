@@ -186,6 +186,22 @@ export async function fetchWalletBalances(address, chainId = 1) {
   return request(`/api/wallet/balances?address=${address}&chainId=${chainId}`)
 }
 
+export async function fetchWalletPortfolio(address) {
+  return request(`/api/wallet/portfolio?address=${encodeURIComponent(address)}`)
+}
+
+// ── CEX (Coinbase) ─────────────────────────────────────────────
+export async function fetchCoinbaseBalances(apiKey, apiSecret) {
+  return request('/api/cex/coinbase/balances', {
+    method: 'POST',
+    body: JSON.stringify({ apiKey, apiSecret }),
+  })
+}
+
+export async function fetchDemoBalances() {
+  return request('/api/cex/demo/balances')
+}
+
 // ── AI Chat ───────────────────────────────────────────────────
 export async function sendChatMessage(messages, portfolioContext = null) {
   return request('/api/chat', {

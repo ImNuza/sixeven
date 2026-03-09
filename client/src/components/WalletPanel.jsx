@@ -7,8 +7,9 @@ import {
 } from 'lucide-react'
 import {
   fetchWalletConnections, saveWalletConnection, deleteWalletConnection, fetchWalletBalances,
+  fetchWalletPortfolio, createAsset,
 } from '../services/api.js'
-import { createAsset } from '../services/api.js'
+import { resolveCoinGeckoId } from '../../../shared/constants.js'
 
 const CHAIN_LABELS = { 1: 'Ethereum', 137: 'Polygon', 42161: 'Arbitrum', 56: 'BSC' }
 
@@ -76,8 +77,24 @@ function WalletCard({ connection, onRemove, onRefresh }) {
     setLoading(true)
     setError('')
     try {
+      // Try Zerion first (multi-chain, richer data in 1 call)
+      try {
+        const data = await fetchWalletPortfolio(connection.address)
+        if (data?.tokens?.length) {
+          setBalances({
+            native: data.tokens.find((t) => !t.contractAddress) || { symbol: 'ETH', balance: 0 },
+            tokens: data.tokens.filter((t) => t.contractAddress),
+            source: 'zerion',
+          })
+          setOpen(true)
+          return
+        }
+      } catch {
+        // Zerion unavailable or not configured — fall through to Alchemy
+      }
+      // Alchemy fallback (single-chain)
       const data = await fetchWalletBalances(connection.address, connection.chain_id)
-      setBalances(data)
+      setBalances({ ...data, source: 'alchemy' })
       setOpen(true)
     } catch (err) {
       setError(err.message)
@@ -88,20 +105,21 @@ function WalletCard({ connection, onRemove, onRefresh }) {
 
   async function importToken(token) {
     const today = new Date().toISOString().split('T')[0]
+    const chainLabel = token.chainId || CHAIN_LABELS[connection.chain_id] || 'Wallet'
     await createAsset({
-      name: token.symbol,
+      name: token.name || token.symbol,
       category: 'CRYPTO',
-      ticker: token.symbol,
+      ticker: token.coingeckoId || resolveCoinGeckoId(token.symbol),
       quantity: token.balance,
-      value: 0,
+      value: token.valueUsd ? Math.round(token.valueUsd * 1.35 * 100) / 100 : 0, // rough USD→SGD
       cost: 0,
       date: today,
-      institution: `${CHAIN_LABELS[connection.chain_id] || 'Wallet'} Wallet`,
+      institution: `${chainLabel} Wallet`,
       details: {
         walletAddress: connection.address,
         contractAddress: token.contractAddress,
-        chainId: connection.chain_id,
-        importedFrom: 'wallet',
+        chainId: token.chainId || connection.chain_id,
+        importedFrom: balances?.source || 'wallet',
       },
     })
   }
@@ -109,19 +127,20 @@ function WalletCard({ connection, onRemove, onRefresh }) {
   async function importNative() {
     if (!balances?.native) return
     const today = new Date().toISOString().split('T')[0]
+    const native = balances.native
     await createAsset({
-      name: balances.native.symbol,
+      name: native.name || native.symbol,
       category: 'CRYPTO',
-      ticker: balances.native.symbol,
-      quantity: balances.native.balance,
-      value: 0,
+      ticker: native.coingeckoId || resolveCoinGeckoId(native.symbol),
+      quantity: native.balance,
+      value: native.valueUsd ? Math.round(native.valueUsd * 1.35 * 100) / 100 : 0,
       cost: 0,
       date: today,
       institution: `${CHAIN_LABELS[connection.chain_id] || 'Wallet'} Wallet`,
       details: {
         walletAddress: connection.address,
         chainId: connection.chain_id,
-        importedFrom: 'wallet',
+        importedFrom: balances?.source || 'wallet',
       },
     })
   }
