@@ -52,13 +52,6 @@ function createMockPool() {
       }
     }
 
-    if (sql.includes('SELECT * FROM assets WHERE id = $1 AND user_id = $2')) {
-      const id = Number(params[0])
-      const userId = Number(params[1])
-      const asset = state.assets.find((item) => item.id === id && Number(item.user_id) === userId)
-      return { rows: asset ? [asset] : [], rowCount: asset ? 1 : 0 }
-    }
-
     if (sql.includes('INSERT INTO assets')) {
       const asset = {
         id: state.nextId++,

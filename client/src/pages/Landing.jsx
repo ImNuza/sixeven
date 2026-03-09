@@ -986,10 +986,8 @@ function CursorScheduler() {
   const [phase, setPhase] = useState(0) // 0 hidden, 1 move-to-cell, 2 click, 3 move-save, 4 save, 5 reset
   const [stepIdx, setStepIdx] = useState(0)
   const containerRef = useRef(null)
-  const cellRefs = useRef({})   // key: `${row}-${col}` → DOM element
-  const saveBtnRef = useRef(null)
-  const [cellPos, setCellPos] = useState({ x: 20, y: 20 })
-  const [savePos, setSavePos] = useState({ x: 110, y: 178 })
+  const [cursorStyle, setCursorStyle] = useState({ opacity: 0, transform: 'translate(0px, 0px)' })
+  const PHASES = [0, 1, 2, 3, 4, 5]
 
   useEffect(() => {
     const durations = [600, 900, 500, 700, 900, 1200]
@@ -1000,42 +998,12 @@ function CursorScheduler() {
   useEffect(() => {
     if (phase === 0) {
       setStepIdx(s => (s + 1) % SCHED_STEPS.length)
+      setCursorStyle({ opacity: 0, transform: 'translate(10px, 10px)' })
     }
   }, [phase])
 
-  // Measure actual cell position whenever the target step changes
-  useEffect(() => {
-    const step = SCHED_STEPS[stepIdx]
-    const cellEl = cellRefs.current[`${step.row}-${step.col}`]
-    const containerEl = containerRef.current
-    if (!cellEl || !containerEl) return
-    const cRect = containerEl.getBoundingClientRect()
-    const eRect = cellEl.getBoundingClientRect()
-    // Place cursor tip at top-left of cell (offset by 2px so tip lands on cell edge)
-    setCellPos({
-      x: eRect.left - cRect.left + 2,
-      y: eRect.top  - cRect.top  + 2,
-    })
-  }, [stepIdx])
-
-  // Measure save button position after first render
-  useEffect(() => {
-    const btnEl = saveBtnRef.current
-    const containerEl = containerRef.current
-    if (!btnEl || !containerEl) return
-    const cRect = containerEl.getBoundingClientRect()
-    const bRect = btnEl.getBoundingClientRect()
-    setSavePos({
-      x: bRect.left - cRect.left + bRect.width / 2 - 4,
-      y: bRect.top  - cRect.top  + 6,
-    })
-  }, [])
-
   const activeStep = SCHED_STEPS[stepIdx]
   const saveActive = phase === 4
-
-  const cursorX = phase >= 3 ? savePos.x : cellPos.x
-  const cursorY = phase >= 3 ? savePos.y : cellPos.y
 
   return (
     <div
@@ -1074,7 +1042,6 @@ function CursorScheduler() {
             return (
               <div
                 key={col}
-                ref={el => { if (el) cellRefs.current[`${row}-${col}`] = el }}
                 className="flex aspect-square items-center justify-center rounded-lg text-xs font-medium transition-all duration-300"
                 style={{
                   fontFamily: T.mono,
@@ -1092,7 +1059,6 @@ function CursorScheduler() {
 
       {/* Save button */}
       <button
-        ref={saveBtnRef}
         className="mt-3 w-full rounded-xl py-2 text-xs font-semibold transition-all duration-400"
         style={{
           fontFamily: T.mono,
@@ -1104,7 +1070,7 @@ function CursorScheduler() {
         {saveActive ? '✓  Saved' : 'Save schedule'}
       </button>
 
-      {/* Animated SVG cursor — positioned by DOM measurement */}
+      {/* Animated SVG cursor */}
       <svg
         className="pointer-events-none absolute"
         width="18"
@@ -1114,7 +1080,11 @@ function CursorScheduler() {
           top: 0,
           left: 0,
           opacity: phase >= 1 && phase <= 4 ? 1 : 0,
-          transform: `translate(${cursorX}px, ${cursorY}px)`,
+          transform: phase === 0
+            ? 'translate(20px, 20px)'
+            : phase <= 2
+              ? `translate(${28 + activeStep.col * 30}px, ${112 + activeStep.row * 26}px)`
+              : 'translate(110px, 178px)',
           transition: 'transform 0.7s cubic-bezier(0.25, 0.46, 0.45, 0.94), opacity 0.35s ease',
         }}
       >

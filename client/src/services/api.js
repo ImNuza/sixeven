@@ -202,25 +202,36 @@ export async function fetchDemoBalances() {
   return request('/api/cex/demo/balances')
 }
 
+// ── Moomoo Singapore (Futu OpenAPI) ───────────────────────────
+export async function fetchMoomooPositions(openDUrl) {
+  return request('/api/moomoo/positions', {
+    method: 'POST',
+    body: JSON.stringify({ openDUrl }),
+  })
+}
+
+export async function fetchMomooDemoPositions() {
+  return request('/api/moomoo/demo/positions')
+}
+
+// ── IBKR Client Portal ────────────────────────────────────────
+export async function fetchIbkrPositions(gatewayUrl) {
+  return request('/api/ibkr/positions', {
+    method: 'POST',
+    body: JSON.stringify({ gatewayUrl }),
+  })
+}
+
+export async function fetchIbkrDemoPositions() {
+  return request('/api/ibkr/demo/positions')
+}
+
 // ── AI Chat ───────────────────────────────────────────────────
 export async function sendChatMessage(messages, portfolioContext = null) {
   return request('/api/chat', {
     method: 'POST',
     body: JSON.stringify({ messages, portfolioContext }),
   })
-}
-
-// ── Markets ───────────────────────────────────────────────────
-export async function fetchMarketsOverview() {
-  return request('/api/markets/overview')
-}
-
-export async function fetchMarketChart(ticker, range = '1mo') {
-  return request(`/api/markets/chart/${encodeURIComponent(ticker)}?range=${range}`)
-}
-
-export async function fetchMarketQuote(ticker) {
-  return request(`/api/markets/quote/${encodeURIComponent(ticker)}`)
 }
 
 // ── OCBC Open API ─────────────────────────────────────────────

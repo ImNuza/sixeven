@@ -9,9 +9,6 @@
  */
 import { createHmac, timingSafeEqual, randomUUID } from 'node:crypto'
 import argon2 from 'argon2'
-import dotenv from 'dotenv'
-
-dotenv.config()
 
 // Crash-fast if secret is missing or too weak
 const AUTH_SECRET = process.env.AUTH_SECRET

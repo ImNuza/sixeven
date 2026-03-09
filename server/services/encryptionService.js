@@ -9,44 +9,18 @@
  * tampering with the ciphertext or metadata is detected on decrypt.
  */
 import { createCipheriv, createDecipheriv, randomBytes, createHmac } from 'node:crypto'
-import dotenv from 'dotenv'
-
-dotenv.config()
 
 const ALGO = 'aes-256-gcm'
 const IV_BYTES = 12    // 96-bit IV — optimal for GCM
 const TAG_BYTES = 16   // 128-bit auth tag — NIST recommended
 const VERSION = 'v1'
 
-function parseEncryptionKey(rawValue) {
-  const raw = String(rawValue || '').trim()
-  if (!raw) {
-    throw new Error('[encryptionService] ENCRYPTION_KEY must be configured as a 32-byte hex or base64 value')
-  }
-
-  if (/^[0-9a-fA-F]{64}$/.test(raw)) {
-    return Buffer.from(raw, 'hex')
-  }
-
-  const base64 = raw.replace(/-/g, '+').replace(/_/g, '/')
-  const padded = `${base64}${'='.repeat((4 - (base64.length % 4)) % 4)}`
-
-  try {
-    const buffer = Buffer.from(padded, 'base64')
-    if (buffer.length === 32) {
-      return buffer
-    }
-  } catch {
-    // Fall through to the shared validation error below.
-  }
-
-  throw new Error('[encryptionService] ENCRYPTION_KEY must decode to exactly 32 bytes (64 hex chars or 32-byte base64)')
-}
-
-const KEY_BUF = parseEncryptionKey(process.env.ENCRYPTION_KEY)
-
 function getKey() {
-  return KEY_BUF
+  const hex = process.env.ENCRYPTION_KEY
+  if (!hex || hex.length < 64) {
+    throw new Error('[encryptionService] ENCRYPTION_KEY must be a 32-byte (64 hex char) value in .env')
+  }
+  return Buffer.from(hex, 'hex')
 }
 
 /**

@@ -14,9 +14,6 @@ const LIVE_PRICED_CATEGORIES = new Set(['STOCKS', 'CRYPTO'])
 export function validateAssetPayload(payload = {}) {
   const errors = []
   const details = payload.details && typeof payload.details === 'object' ? payload.details : {}
-  const hasTicker = Boolean(String(payload.ticker || '').trim())
-  const hasQuantity = payload.quantity !== '' && payload.quantity != null
-  const isLivePricedEntry = LIVE_PRICED_CATEGORIES.has(payload.category) && (hasTicker || hasQuantity)
 
   if (!String(payload.name || '').trim()) {
     errors.push('Asset name is required.')
@@ -34,12 +31,12 @@ export function validateAssetPayload(payload = {}) {
     errors.push('Cost must be 0 or greater.')
   }
 
-  if (isLivePricedEntry) {
-    if (!hasTicker) {
+  if (LIVE_PRICED_CATEGORIES.has(payload.category)) {
+    if (!String(payload.ticker || '').trim()) {
       errors.push('Ticker or coin id is required for live-priced assets.')
     }
 
-    if (!hasQuantity || !isPositiveNumber(payload.quantity)) {
+    if (!isPositiveNumber(payload.quantity)) {
       errors.push('Quantity must be greater than 0 for live-priced assets.')
     }
 

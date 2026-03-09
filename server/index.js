@@ -22,13 +22,12 @@ const app = createApp({
   updateProfile,
 })
 
-app.listen(PORT, async () => {
+app.listen(PORT, () => {
   console.log(`SafeSeven API running on http://localhost:${PORT}`)
-  try {
-    await refreshAllPrices('startup_refresh')
-  } catch (err) {
+  // Fire-and-forget — don't delay the server from accepting requests
+  refreshAllPrices('startup_refresh').catch(err =>
     console.error('[startup] Price refresh failed:', err.message)
-  }
+  )
 })
 
 cron.schedule('*/5 * * * *', async () => {
