@@ -397,29 +397,77 @@ HARD RULES:
 
   // ── OCBC Open API (OAuth 2.0 Client Credentials) ──────────────
   // No redirect URL needed — server exchanges client_id + client_secret directly.
-  const OCBC_TOKEN_URL = process.env.OCBC_TOKEN_URL || 'https://api.ocbc.com/token'
   const OCBC_API_BASE  = process.env.OCBC_API_BASE  || 'https://api.ocbc.com'
+  const OCBC_TOKEN_URL = process.env.OCBC_TOKEN_URL || `${OCBC_API_BASE}/token`
+
+  function firstEnv(...keys) {
+    for (const key of keys) {
+      const value = process.env[key]
+      if (typeof value === 'string' && value.trim()) {
+        return value.trim()
+      }
+    }
+    return ''
+  }
+
+  function getOcbcCredentials() {
+    const clientId = firstEnv('OCBC_CLIENT_ID', 'OCBC_APP_ID', 'OCBC_API_KEY')
+    const clientSecret = firstEnv('OCBC_CLIENT_SECRET', 'OCBC_SECRET', 'OCBC_API_SECRET')
+    return { clientId, clientSecret }
+  }
+
+  function getMyInfoConfig() {
+    const appId = firstEnv('MYINFO_APP_ID', 'SINGPASS_APP_ID', 'SINGPASS_CLIENT_ID')
+    const privateKey = firstEnv('MYINFO_PRIVATE_KEY', 'SINGPASS_PRIVATE_KEY').replace(/\\r/g, '').replace(/\\n/g, '\n')
+    const redirectUri = firstEnv('MYINFO_REDIRECT_URI', 'SINGPASS_REDIRECT_URI') || 'http://localhost:3001/api/singpass/callback'
+    return { appId, privateKey, redirectUri }
+  }
 
   async function getOcbcToken() {
-    const clientId     = process.env.OCBC_CLIENT_ID
-    const clientSecret = process.env.OCBC_CLIENT_SECRET
+    const { clientId, clientSecret } = getOcbcCredentials()
     if (!clientId || !clientSecret || clientId.includes('your_') || clientSecret.includes('your_')) {
-      throw new Error('OCBC credentials are not configured for this environment. Use manual bank input or connect later.')
+      throw new Error('OCBC credentials are not configured. Set OCBC_CLIENT_ID and OCBC_CLIENT_SECRET in server/.env, then restart.')
     }
 
     const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString('base64')
-    const tokenRes = await axios.post(
-      OCBC_TOKEN_URL,
-      new URLSearchParams({ grant_type: 'client_credentials' }).toString(),
-      {
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          Authorization: `Basic ${credentials}`,
+    const tokenUrls = [...new Set([OCBC_TOKEN_URL, `${OCBC_API_BASE}/oauth/token`, `${OCBC_API_BASE}/token`])]
+    const attempts = []
+
+    for (const tokenUrl of tokenUrls) {
+      const requestModes = [
+        {
+          data: new URLSearchParams({ grant_type: 'client_credentials' }).toString(),
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            Authorization: `Basic ${credentials}`,
+          },
         },
-        timeout: 15000,
+        {
+          data: new URLSearchParams({
+            grant_type: 'client_credentials',
+            client_id: clientId,
+            client_secret: clientSecret,
+          }).toString(),
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+        },
+      ]
+
+      for (const mode of requestModes) {
+        try {
+          const tokenRes = await axios.post(tokenUrl, mode.data, {
+            headers: mode.headers,
+            timeout: 15000,
+          })
+          return tokenRes.data // { access_token, expires_in, token_type, ... }
+        } catch (error) {
+          attempts.push(`${tokenUrl} -> ${error.response?.status || error.code || error.message}`)
+        }
       }
-    )
-    return tokenRes.data // { access_token, expires_in, token_type, ... }
+    }
+
+    throw new Error(`OCBC token request failed. Verify credentials, OCBC_TOKEN_URL, and network access. Attempts: ${attempts.join(' | ')}`)
   }
 
   // Connect: fetch a client-credentials token and store it
@@ -497,9 +545,10 @@ HARD RULES:
 
   // ── SGFinDex / MyInfo ─────────────────────────────────────────
   app.get('/api/singpass/auth-url', requireAuth, async (req, res) => {
-    const appId = process.env.MYINFO_APP_ID
-    const redirectUri = process.env.MYINFO_REDIRECT_URI || 'http://localhost:3001/api/singpass/callback'
-    if (!appId) return res.status(503).json({ error: 'MYINFO_APP_ID not configured' })
+    const { appId, redirectUri } = getMyInfoConfig()
+    if (!appId) {
+      return res.status(503).json({ error: 'MYINFO_APP_ID not configured. Set MYINFO_APP_ID (or SINGPASS_APP_ID) in server/.env and restart.' })
+    }
 
     const codeVerifier = crypto.randomBytes(32).toString('base64url')
     const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url')
@@ -529,10 +578,12 @@ HARD RULES:
     pkceStore.delete(state)
 
     const { codeVerifier, userId } = session
-    const appId = process.env.MYINFO_APP_ID
-    const privateKeyPem = process.env.MYINFO_PRIVATE_KEY?.replace(/\\n/g, '\n')
-    const redirectUri = process.env.MYINFO_REDIRECT_URI || 'http://localhost:3001/api/singpass/callback'
+    const { appId, privateKey: privateKeyPem, redirectUri } = getMyInfoConfig()
     const tokenUrl = `${MYINFO_BASE}/com/v4/token`
+    if (!appId || !privateKeyPem) {
+      const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173'
+      return res.redirect(`${clientUrl}/assets?singpass=error&msg=${encodeURIComponent('MYINFO_APP_ID or MYINFO_PRIVATE_KEY not configured on server')}`)
+    }
 
     try {
       const clientAssertion = await makeMyInfoClientAssertion(appId, tokenUrl, privateKeyPem)

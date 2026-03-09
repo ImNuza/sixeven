@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   ArrowRight, ChevronLeft, Loader2, MapPinned, ShieldCheck, Sparkles, WalletCards,
@@ -44,6 +44,20 @@ const EXPENSE_RANGES = [
   'S$7,001 - S$10,000',
   'Above S$10,000',
 ]
+const LIQUID_ASSET_RANGES = [
+  'Below S$5,000',
+  'S$5,000 - S$20,000',
+  'S$20,001 - S$50,000',
+  'S$50,001 - S$100,000',
+  'Above S$100,000',
+]
+const CPF_RANGES = [
+  'Below S$20,000',
+  'S$20,000 - S$80,000',
+  'S$80,001 - S$180,000',
+  'S$180,001 - S$350,000',
+  'Above S$350,000',
+]
 const AGE_RANGES = ['18-24', '25-34', '35-44', '45-54', '55-64', '65+']
 const GOAL_OPTIONS = [
   'Save for retirement',
@@ -69,13 +83,17 @@ const INITIAL_VALUES = {
   incomeRange: '',
   monthlyExpensesRange: '',
   liquidAssets: '',
+  liquidAssetsRange: '',
   cpfBalance: '',
+  cpfBalanceRange: '',
   stocksValue: '',
   bondsValue: '',
   cryptoValue: '',
+  ownsProperty: '',
   propertyPostcode: '',
   propertyValue: '',
   mortgageOutstanding: '',
+  hasOtherDebts: '',
   otherDebts: '',
   bankLinkMode: '',
   manualBankBalance: '',
@@ -209,15 +227,19 @@ function buildProfilePayload(values, user, propertyLookup, integrationState) {
     incomeRange: values.incomeRange,
     monthlyExpensesRange: values.monthlyExpensesRange,
     liquidAssets: parseAmount(values.liquidAssets),
+    liquidAssetsRange: values.liquidAssetsRange || null,
     cpfBalance: parseAmount(values.cpfBalance),
+    cpfBalanceRange: values.cpfBalanceRange || null,
     stocksValue: parseAmount(values.stocksValue),
     bondsValue: parseAmount(values.bondsValue),
     cryptoValue: parseAmount(values.cryptoValue),
     propertyPostcode: values.propertyPostcode.trim(),
+    ownsProperty: values.ownsProperty || null,
     propertyValue: parseAmount(values.propertyValue),
     mortgageOutstanding: parseAmount(values.mortgageOutstanding),
     propertyLookup,
     otherDebts: parseAmount(values.otherDebts),
+    hasOtherDebts: values.hasOtherDebts || null,
     bankLinkMode: values.bankLinkMode,
     manualBankBalance: parseAmount(values.manualBankBalance),
     walletAddresses: parseWalletAddresses(values.walletAddresses),
@@ -391,6 +413,24 @@ export default function Onboarding() {
     [values, user, propertyLookupState.data, integrationState]
   )
 
+  useEffect(() => {
+    if (values.ownsProperty === 'No') {
+      setValues((current) => ({
+        ...current,
+        propertyPostcode: '',
+        propertyValue: '',
+        mortgageOutstanding: '',
+      }))
+      setPropertyLookupState({ loading: false, data: null, error: '' })
+    }
+  }, [values.ownsProperty])
+
+  useEffect(() => {
+    if (values.hasOtherDebts === 'No') {
+      setValues((current) => ({ ...current, otherDebts: '' }))
+    }
+  }, [values.hasOtherDebts])
+
   function setField(key, value) {
     setValues((current) => ({ ...current, [key]: value }))
   }
@@ -426,7 +466,7 @@ export default function Onboarding() {
     try {
       await connectOcbc()
       setIntegrationState((current) => ({ ...current, ocbcConnecting: false, ocbcConnected: true, ocbcError: '' }))
-      setField('bankLinkMode', 'Connect OCBC now')
+      setField('bankLinkMode', 'Connect OCBC')
     } catch (err) {
       setIntegrationState((current) => ({ ...current, ocbcConnecting: false, ocbcConnected: false, ocbcError: err.message || 'OCBC connection failed.' }))
     }
@@ -503,10 +543,24 @@ export default function Onboarding() {
       case 'expenses':
         return values.monthlyExpensesRange ? '' : 'Choose your monthly expense range.'
       case 'liquidity':
-        return parseAmount(values.liquidAssets) > 0 ? '' : 'Enter your approximate liquid assets.'
+        return parseAmount(values.liquidAssets) > 0 || values.liquidAssetsRange ? '' : 'Add either an amount or a range for your available cash or savings.'
       case 'property':
+        if (!values.ownsProperty) {
+          return 'Please choose whether you currently own any property.'
+        }
+        if (values.ownsProperty !== 'Yes') {
+          return ''
+        }
         if (values.propertyPostcode && !propertyLookupState.data && !propertyLookupState.loading) {
           return 'Use the lookup button to resolve the property postcode first.'
+        }
+        return ''
+      case 'debts':
+        if (!values.hasOtherDebts) {
+          return 'Please choose Yes or No.'
+        }
+        if (values.hasOtherDebts === 'Yes' && parseAmount(values.otherDebts) <= 0) {
+          return 'Please enter your approximate total outstanding debt.'
         }
         return ''
       case 'consent':
@@ -685,65 +739,113 @@ export default function Onboarding() {
         return <StepShell step={stepIndex} total={totalProgressSteps} title="What is your approximate monthly living expense level?" description="A broad range is enough.">{renderChoice(EXPENSE_RANGES, 'monthlyExpensesRange')}</StepShell>
       case 'liquidity':
         return (
-          <StepShell step={stepIndex} total={totalProgressSteps} title="How much do you roughly hold in liquid assets?" description="Cash, savings, and cash-equivalents only.">
-            <input type="number" value={values.liquidAssets} onChange={(event) => setField('liquidAssets', event.target.value)} placeholder="e.g. 35000" style={inputStyle()} />
+          <StepShell
+            step={stepIndex}
+            total={totalProgressSteps}
+            title="How much cash or savings do you currently have available?"
+            description="Include money you can access quickly, such as savings accounts, checking accounts, and cash balances. Exclude long-term investments or property."
+          >
+            <div style={{ display: 'grid', gap: '0.9rem' }}>
+              <input type="number" value={values.liquidAssets} onChange={(event) => setField('liquidAssets', event.target.value)} placeholder="Enter an amount (e.g. 35,000)" style={inputStyle()} />
+              <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: '0.85rem' }}>Or choose a quick range:</p>
+              {renderChoice(LIQUID_ASSET_RANGES, 'liquidAssetsRange')}
+            </div>
           </StepShell>
         )
       case 'cpf':
         return (
-          <StepShell step={stepIndex} total={totalProgressSteps} title="What is your approximate CPF balance?" description="This is optional. You can skip it if you prefer.">
-            <input type="number" value={values.cpfBalance} onChange={(event) => setField('cpfBalance', event.target.value)} placeholder="Optional" style={inputStyle()} />
+          <StepShell
+            step={stepIndex}
+            total={totalProgressSteps}
+            title="What is your approximate total CPF balance?"
+            description="You can enter your combined CPF savings across OA, SA, and MA. This is optional, and you can skip it if you prefer."
+          >
+            <div style={{ display: 'grid', gap: '0.9rem' }}>
+              <input type="number" value={values.cpfBalance} onChange={(event) => setField('cpfBalance', event.target.value)} placeholder="Enter an amount (optional)" style={inputStyle()} />
+              <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: '0.85rem' }}>Or choose a quick range:</p>
+              {renderChoice(CPF_RANGES, 'cpfBalanceRange')}
+            </div>
           </StepShell>
         )
       case 'investments':
         return (
-          <StepShell step={stepIndex} total={totalProgressSteps} title="Give us broad estimates of your investments" description="Approximate values are enough.">
+          <StepShell
+            step={stepIndex}
+            total={totalProgressSteps}
+            title="How much do you roughly have invested across the following assets?"
+            description="Approximate values are fine. Include investments held in brokerage accounts or robo-advisors."
+          >
             <div style={{ display: 'grid', gap: '1rem' }}>
-              <input type="number" value={values.stocksValue} onChange={(event) => setField('stocksValue', event.target.value)} placeholder="Stocks / ETFs / funds (SGD)" style={inputStyle()} />
-              <input type="number" value={values.bondsValue} onChange={(event) => setField('bondsValue', event.target.value)} placeholder="Bonds / fixed income (SGD)" style={inputStyle()} />
-              <input type="number" value={values.cryptoValue} onChange={(event) => setField('cryptoValue', event.target.value)} placeholder="Crypto (SGD)" style={inputStyle()} />
+              <input type="number" value={values.stocksValue} onChange={(event) => setField('stocksValue', event.target.value)} placeholder="Stocks / ETFs / funds (SGD), e.g. 25,000" style={inputStyle()} />
+              <input type="number" value={values.bondsValue} onChange={(event) => setField('bondsValue', event.target.value)} placeholder="Bonds / fixed income (SGD), e.g. 10,000" style={inputStyle()} />
+              <input type="number" value={values.cryptoValue} onChange={(event) => setField('cryptoValue', event.target.value)} placeholder="Crypto (SGD), e.g. 3,500" style={inputStyle()} />
             </div>
           </StepShell>
         )
       case 'property':
         return (
-          <StepShell step={stepIndex} total={totalProgressSteps} title="Tell us about any property you own" description="Add a Singapore postcode to look up the address and recent HDB resale data.">
+          <StepShell
+            step={stepIndex}
+            total={totalProgressSteps}
+            title="Do you own any property?"
+            description="Enter a Singapore postcode to look up the address and estimate its value. You can also enter the value manually."
+          >
             <div style={{ display: 'grid', gap: '1rem' }}>
-              <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-                <input type="text" value={values.propertyPostcode} onChange={(event) => setField('propertyPostcode', event.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="6-digit postcode" style={{ ...inputStyle(), flex: 1, minWidth: 220 }} />
-                <button type="button" onClick={handlePropertyLookup} disabled={propertyLookupState.loading || values.propertyPostcode.length !== 6} style={buttonStyle(false)}>
-                  {propertyLookupState.loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <MapPinned className="h-4 w-4" />}
-                  Lookup
-                </button>
-              </div>
-              {propertyLookupState.error && <p style={{ color: '#fca5a5', fontSize: '0.9rem' }}>{propertyLookupState.error}</p>}
-              {propertyLookupState.data && (
-                <div style={{ border: '1px solid rgba(255,255,255,0.1)', borderRadius: '1rem', padding: '1rem', background: 'rgba(255,255,255,0.03)' }}>
-                  <p style={{ fontWeight: 600 }}>{propertyLookupState.data.address}</p>
-                  <p style={{ color: 'rgba(255,255,255,0.45)', marginTop: '0.35rem' }}>{propertyLookupState.data.town || 'Singapore'}</p>
-                  {propertyLookupState.data.hdb?.latestResalePrice && (
-                    <p style={{ color: '#86efac', marginTop: '0.6rem' }}>
-                      Latest nearby HDB resale reference: {formatCurrency(propertyLookupState.data.hdb.latestResalePrice)}
-                    </p>
+              {renderChoice(['Yes', 'No'], 'ownsProperty')}
+              {values.ownsProperty === 'Yes' && (
+                <>
+                  <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                    <input type="text" value={values.propertyPostcode} onChange={(event) => setField('propertyPostcode', event.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="6-digit postcode" style={{ ...inputStyle(), flex: 1, minWidth: 220 }} />
+                    <button type="button" onClick={handlePropertyLookup} disabled={propertyLookupState.loading || values.propertyPostcode.length !== 6} style={buttonStyle(false)}>
+                      {propertyLookupState.loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <MapPinned className="h-4 w-4" />}
+                      Lookup
+                    </button>
+                  </div>
+                  {propertyLookupState.error && <p style={{ color: '#fca5a5', fontSize: '0.9rem' }}>{propertyLookupState.error}</p>}
+                  {propertyLookupState.data && (
+                    <div style={{ border: '1px solid rgba(255,255,255,0.1)', borderRadius: '1rem', padding: '1rem', background: 'rgba(255,255,255,0.03)' }}>
+                      <p style={{ fontWeight: 600 }}>{propertyLookupState.data.address}</p>
+                      <p style={{ color: 'rgba(255,255,255,0.45)', marginTop: '0.35rem' }}>{propertyLookupState.data.town || 'Singapore'}</p>
+                      {propertyLookupState.data.hdb?.latestResalePrice && (
+                        <p style={{ color: '#86efac', marginTop: '0.6rem' }}>
+                          Latest nearby HDB resale reference: {formatCurrency(propertyLookupState.data.hdb.latestResalePrice)}
+                        </p>
+                      )}
+                    </div>
                   )}
-                </div>
+                  <input type="number" value={values.propertyValue} onChange={(event) => setField('propertyValue', event.target.value)} placeholder="Estimated property value (SGD)" style={inputStyle()} />
+                  <input type="number" value={values.mortgageOutstanding} onChange={(event) => setField('mortgageOutstanding', event.target.value)} placeholder="Outstanding mortgage (SGD)" style={inputStyle()} />
+                </>
               )}
-              <input type="number" value={values.propertyValue} onChange={(event) => setField('propertyValue', event.target.value)} placeholder="Property value (SGD)" style={inputStyle()} />
-              <input type="number" value={values.mortgageOutstanding} onChange={(event) => setField('mortgageOutstanding', event.target.value)} placeholder="Outstanding mortgage (SGD)" style={inputStyle()} />
             </div>
           </StepShell>
         )
       case 'debts':
         return (
-          <StepShell step={stepIndex} total={totalProgressSteps} title="Do you have any other debts or loans?" description="If yes, enter the approximate total.">
-            <input type="number" value={values.otherDebts} onChange={(event) => setField('otherDebts', event.target.value)} placeholder="Optional" style={inputStyle()} />
+          <StepShell
+            step={stepIndex}
+            total={totalProgressSteps}
+            title="Do you have any outstanding debts apart from your mortgage?"
+            description="Include personal loans, student loans, credit card balances, car loans, or other outstanding debt. Approximate values are fine."
+          >
+            <div style={{ display: 'grid', gap: '1rem' }}>
+              {renderChoice(['Yes', 'No'], 'hasOtherDebts')}
+              {values.hasOtherDebts === 'Yes' && (
+                <input type="number" value={values.otherDebts} onChange={(event) => setField('otherDebts', event.target.value)} placeholder="Approximate total outstanding debt (SGD)" style={inputStyle()} />
+              )}
+            </div>
           </StepShell>
         )
       case 'banking':
         return (
-          <StepShell step={stepIndex} total={totalProgressSteps} title="Would you like to link your bank accounts now?" description="You can connect OCBC now or add a manual bank balance instead.">
+          <StepShell
+            step={stepIndex}
+            total={totalProgressSteps}
+            title="Would you like to add your bank balances now?"
+            description="You can connect OCBC, enter balances manually, or skip this step for now."
+          >
             <div style={{ display: 'grid', gap: '0.8rem' }}>
-              {['Connect OCBC now', 'Enter balances manually', 'Do this later'].map((option) => {
+              {['Connect OCBC', 'Enter balances manually', 'Skip for now'].map((option) => {
                 const active = values.bankLinkMode === option
                 return (
                   <button
@@ -763,7 +865,7 @@ export default function Onboarding() {
                 )
               })}
             </div>
-            {values.bankLinkMode === 'Connect OCBC now' && (
+            {values.bankLinkMode === 'Connect OCBC' && (
               <div style={{ marginTop: '1rem', display: 'grid', gap: '0.8rem' }}>
                 <button type="button" onClick={handleConnectOcbc} disabled={integrationState.ocbcConnecting || integrationState.ocbcConnected} style={buttonStyle(true)}>
                   {integrationState.ocbcConnecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Landmark className="h-4 w-4" />}

@@ -31,9 +31,9 @@ function convertPlaceholders(sql, params = []) {
   // Collect all placeholder references in order
   while ((match = placeholderPattern.exec(sql)) !== null) {
     const paramIndex = parseInt(match[1], 10) - 1 // $1 -> index 0
-    if (paramIndex >= 0 && paramIndex < params.length) {
-      mappedParams.push(params[paramIndex])
-    }
+    mappedParams.push(
+      (paramIndex >= 0 && paramIndex < params.length) ? params[paramIndex] : null
+    )
   }
   
   // Replace all $n with ?

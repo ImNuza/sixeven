@@ -1,5 +1,28 @@
 import axios from 'axios'
 
+const DEFAULT_OPEND_URL = 'http://127.0.0.1:33333'
+
+function normalizeOpenDBase(openDUrl) {
+  const raw = String(openDUrl || DEFAULT_OPEND_URL).trim()
+  const withProtocol = /^https?:\/\//i.test(raw) ? raw : `http://${raw}`
+  return withProtocol.replace(/\/$/, '')
+}
+
+function buildOpenDCandidates(openDUrl) {
+  const base = normalizeOpenDBase(openDUrl)
+  const url = new URL(base)
+  const port = url.port || '33333'
+  const host = url.hostname.toLowerCase()
+  const protocol = url.protocol || 'http:'
+
+  const hosts = new Set([host])
+  if (host === 'localhost') hosts.add('127.0.0.1')
+  if (host === '127.0.0.1') hosts.add('localhost')
+  hosts.add('0.0.0.0')
+
+  return [...hosts].map((candidateHost) => `${protocol}//${candidateHost}:${port}`)
+}
+
 /**
  * Moomoo Singapore — Futu OpenAPI via OpenD gateway
  *
@@ -13,19 +36,31 @@ import axios from 'axios'
  * @param {string} openDUrl  - Base URL of the running OpenD process, e.g. "http://127.0.0.1:33333"
  */
 export async function fetchMoomooPositions(openDUrl = 'http://127.0.0.1:33333') {
-  const base = openDUrl.replace(/\/$/, '')
-  const client = axios.create({ baseURL: base, timeout: 15000 })
+  const candidates = buildOpenDCandidates(openDUrl)
+  let accounts = []
+  let client = null
+  const connectionErrors = []
 
   // 1. Get account list
-  let accounts
-  try {
-    const { data } = await client.post('/moomoo/get_acc_list', { trd_env: 1 }) // 1 = REAL
-    accounts = data?.data?.acc_list || []
-  } catch (err) {
-    if (err.code === 'ECONNREFUSED') {
-      throw new Error('Cannot connect to OpenD. Make sure it is running at ' + base)
+  for (const base of candidates) {
+    try {
+      const candidateClient = axios.create({ baseURL: base, timeout: 15000 })
+      const { data } = await candidateClient.post('/moomoo/get_acc_list', { trd_env: 1 }) // 1 = REAL
+      accounts = data?.data?.acc_list || []
+      client = candidateClient
+      break
+    } catch (err) {
+      connectionErrors.push(`${base} -> ${err.code || err.response?.status || err.message}`)
     }
-    throw new Error('OpenD connection failed: ' + (err.response?.data?.msg || err.message))
+  }
+
+  if (!client) {
+    const error = new Error(
+      `Cannot connect to OpenD. Make sure it is running at ${DEFAULT_OPEND_URL}. Tried: ${candidates.join(', ')}`
+    )
+    error.code = 'ECONNREFUSED'
+    error.details = connectionErrors
+    throw error
   }
 
   if (!accounts.length) {
