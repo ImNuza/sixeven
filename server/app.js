@@ -728,7 +728,7 @@ HARD RULES:
       res.json({ balances, source: 'coinbase' })
     } catch (err) {
       if (err.response?.status === 401) {
-        return res.status(401).json({ error: 'Invalid API key. Ensure read-only permissions are enabled.' })
+        return res.status(400).json({ error: 'Invalid Coinbase API key. Ensure read-only permissions are enabled.' })
       }
       res.status(500).json({ error: err.message })
     }
