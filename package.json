@@ -1,0 +1,16 @@
+{
+  "name": "safeseven",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "predev": "npx --yes kill-port 3001 5173 || true",
+    "dev": "concurrently \"npm run dev:client\" \"npm run dev:server\"",
+    "dev:client": "cd client && npm run dev",
+    "dev:server": "cd server && npm run dev",
+    "audit:all": "npm audit --audit-level=high && cd client && npm audit --audit-level=high && cd ../server && npm audit --audit-level=high"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}
