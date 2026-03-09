@@ -1,4 +1,4 @@
-import { WELLNESS_THRESHOLDS, ASSET_CATEGORIES } from './constants.js'
+import { WELLNESS_THRESHOLDS, ASSET_CATEGORIES, TARGET_ALLOCATION, isStablecoin } from './constants.js'
 
 function round(value, digits = 1) {
   return Number(value.toFixed(digits))
@@ -30,8 +30,13 @@ export function buildPortfolioInsights(assets, summary, prices = []) {
   const largestCategoryPct = totalValue > 0 ? largestCategoryValue / totalValue : 0
   const liquidValue = ['CASH', 'STOCKS', 'CRYPTO'].reduce((sum, key) => sum + (byCategory[key] || 0), 0)
   const liquidPct = totalValue > 0 ? liquidValue / totalValue : 0
-  const cryptoPct = totalValue > 0 ? (byCategory.CRYPTO || 0) / totalValue : 0
-  const cashMonths = (byCategory.CASH || 0) / WELLNESS_THRESHOLDS.MONTHLY_EXPENSES
+  // Separate stablecoins from volatile crypto for accurate risk metrics
+  const stablecoinValue = assets
+    .filter((a) => a.category === 'CRYPTO' && isStablecoin(a.ticker))
+    .reduce((sum, a) => sum + a.value, 0)
+  const volatileCryptoValue = (byCategory.CRYPTO || 0) - stablecoinValue
+  const cryptoPct = totalValue > 0 ? volatileCryptoValue / totalValue : 0
+  const cashMonths = ((byCategory.CASH || 0) + stablecoinValue) / WELLNESS_THRESHOLDS.MONTHLY_EXPENSES
 
   const assetMoves = assets
     .map((asset) => {
@@ -73,6 +78,31 @@ export function buildPortfolioInsights(assets, summary, prices = []) {
       message: `${round(cashMonths)} months of expenses covered${cashMonths < WELLNESS_THRESHOLDS.EMERGENCY_FUND_MONTHS ? ` — target is ${WELLNESS_THRESHOLDS.EMERGENCY_FUND_MONTHS} months.` : '.'}`,
     },
   ]
+
+  // Concentration risk — single-asset level
+  const maxAssetValue = assets.length > 0 ? Math.max(...assets.map((a) => a.value)) : 0
+  const maxAssetPct = totalValue > 0 ? maxAssetValue / totalValue : 0
+  if (maxAssetPct > WELLNESS_THRESHOLDS.SINGLE_ASSET_MAX) {
+    const topAsset = assets.reduce((top, a) => a.value > top.value ? a : top, assets[0])
+    highlights.push({
+      type: 'warning',
+      title: 'Single-Asset Risk',
+      message: `"${topAsset.name}" is ${round(maxAssetPct * 100)}% of your portfolio — consider spreading risk below 25%.`,
+    })
+  }
+
+  // Rebalancing drift
+  const maxDrift = Object.entries(TARGET_ALLOCATION).reduce((max, [cat, target]) => {
+    const actual = totalValue > 0 ? (byCategory[cat] || 0) / totalValue : 0
+    return Math.max(max, Math.abs(actual - target))
+  }, 0)
+  if (maxDrift > WELLNESS_THRESHOLDS.REBALANCING_DRIFT_MAX) {
+    highlights.push({
+      type: 'info',
+      title: 'Rebalancing Needed',
+      message: `Portfolio has drifted ${round(maxDrift * 100)}% from target allocation — review your balance.`,
+    })
+  }
 
   const metrics = [
     { label: 'Largest Category', value: `${round(largestCategoryPct * 100)}%`, detail: ASSET_CATEGORIES[largestCategory] || largestCategory },

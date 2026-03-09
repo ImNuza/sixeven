@@ -716,6 +716,47 @@ HARD RULES:
     }
   })
 
+  // ── Coinbase CEX integration ──
+  app.post('/api/cex/coinbase/balances', requireAuth, async (req, res) => {
+    const { apiKey, apiSecret } = req.body
+    if (!apiKey || !apiSecret) {
+      return res.status(400).json({ error: 'API key and secret are required' })
+    }
+    try {
+      const { fetchCoinbaseBalances } = await import('./services/cexService.js')
+      const balances = await fetchCoinbaseBalances(apiKey, apiSecret)
+      res.json({ balances, source: 'coinbase' })
+    } catch (err) {
+      if (err.response?.status === 401) {
+        return res.status(401).json({ error: 'Invalid API key. Ensure read-only permissions are enabled.' })
+      }
+      res.status(500).json({ error: err.message })
+    }
+  })
+
+  app.get('/api/cex/demo/balances', requireAuth, async (_req, res) => {
+    const { getDemoBalances } = await import('./services/cexService.js')
+    res.json({ balances: getDemoBalances(), source: 'demo' })
+  })
+
+  // ── Zerion wallet portfolio (richer data, multi-chain, falls back to Alchemy) ──
+  app.get('/api/wallet/portfolio', requireAuth, async (req, res) => {
+    const { address } = req.query
+    if (!address || !/^0x[0-9a-fA-F]{40}$/.test(address)) {
+      return res.status(400).json({ error: 'Invalid Ethereum address' })
+    }
+    try {
+      const { isZerionConfigured, fetchWalletPortfolio } = await import('./services/zerionService.js')
+      if (!isZerionConfigured()) {
+        return res.status(503).json({ error: 'Zerion not configured — use /api/wallet/balances instead' })
+      }
+      const tokens = await fetchWalletPortfolio(address)
+      res.json({ address, tokens, source: 'zerion' })
+    } catch (err) {
+      res.status(500).json({ error: err.message })
+    }
+  })
+
   // Purge expired revoked tokens every hour — keeps the denylist table small
   setInterval(async () => {
     try {

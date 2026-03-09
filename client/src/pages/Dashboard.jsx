@@ -215,7 +215,10 @@ export default function Dashboard() {
     return () => { cancelled = true; window.clearInterval(id) }
   }, [])
 
-  const { score, breakdown } = useMemo(() => calculateWellnessScore(assets), [assets])
+  const { score, breakdown } = useMemo(
+    () => calculateWellnessScore(assets, { monthlyChangePct: summary?.monthlyChangePct ?? null }),
+    [assets, summary]
+  )
   const healthStatus = useMemo(() => getWellnessStatus(score), [score])
   const insights = useMemo(() => buildPortfolioInsights(assets, summary, prices), [assets, prices, summary])
 
@@ -551,7 +554,7 @@ function WellnessContent({ breakdown, healthStatus, score }) {
   return (
     <>
       <div className="flex items-start justify-between mb-5">
-        <SectionHeader title="Wellness Breakdown" sub="The 4 factors behind your score" />
+        <SectionHeader title="Wellness Breakdown" sub="The 8 factors behind your score" />
         <div className="flex items-center gap-1.5 flex-shrink-0">
           <ShieldCheck className="h-3.5 w-3.5" style={{ color: healthStatus.color }} />
           <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: healthStatus.color }}>{healthStatus.label}</span>
@@ -564,14 +567,14 @@ function WellnessContent({ breakdown, healthStatus, score }) {
               <span className="text-sm" style={{ color: 'var(--app-text-soft)' }}>{item.label}</span>
               <div className="flex items-center gap-3">
                 <span className="text-xs" style={{ color: 'var(--app-text-muted)' }}>{item.detail}</span>
-                <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${item.status === 'pass' ? 'bg-emerald-400/10 text-emerald-400' : 'bg-red-400/10 text-red-400'}`}>
+                <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${item.status === 'pass' ? 'bg-emerald-400/10 text-emerald-400' : item.status === 'neutral' ? 'bg-blue-400/10 text-blue-400' : 'bg-red-400/10 text-red-400'}`}>
                   {item.score}/{item.max}
                 </span>
               </div>
             </div>
             <div className="h-1.5 rounded-full bg-white/[0.06] overflow-hidden">
               <div className="h-full rounded-full transition-all duration-500"
-                style={{ width: `${(item.score / item.max) * 100}%`, backgroundColor: item.status === 'pass' ? '#18a871' : '#e65054' }} />
+                style={{ width: `${(item.score / item.max) * 100}%`, backgroundColor: item.status === 'pass' ? '#18a871' : item.status === 'neutral' ? '#2f7cf6' : '#e65054' }} />
             </div>
           </div>
         ))}

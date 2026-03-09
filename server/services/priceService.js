@@ -1,6 +1,7 @@
 import axios from 'axios'
 import { pool } from '../db.js'
 import { recordNetWorthSnapshot } from './portfolioService.js'
+import { resolveCoinGeckoId } from '../../shared/constants.js'
 
 const ALPHA_VANTAGE_KEY = process.env.ALPHA_VANTAGE_KEY
 const refreshLocks = new Map()
@@ -86,16 +87,23 @@ async function refreshUserPricesInternal(userId, snapshotSource = 'price_refresh
 
     if (cryptoAssets.length) {
       try {
-        const priceMap = await getCryptoPrices([...new Set(cryptoAssets.map((asset) => asset.ticker))])
+        // Map each asset's ticker to a CoinGecko ID (handles both "ETH" and "ethereum")
+        const tickerToGeckoId = Object.fromEntries(
+          cryptoAssets.map((a) => [a.ticker, resolveCoinGeckoId(a.ticker)])
+        )
+        const uniqueGeckoIds = [...new Set(Object.values(tickerToGeckoId).filter(Boolean))]
+        const priceMap = await getCryptoPrices(uniqueGeckoIds)
+
         for (const asset of cryptoAssets) {
-          const coinData = priceMap[asset.ticker]
+          const geckoId = tickerToGeckoId[asset.ticker]
+          const coinData = geckoId ? priceMap[geckoId] : null
           if (!coinData) {
             continue
           }
 
           const priceSgd = coinData.sgd || coinData.usd * usdSgd
           const priceUsd = coinData.usd
-          await upsertPrice(client, asset.ticker, priceUsd, priceSgd)
+          await upsertPrice(client, geckoId, priceUsd, priceSgd)
           await updateAssetValue(client, asset.id, priceSgd, parseFloat(asset.quantity))
         }
       } catch {
