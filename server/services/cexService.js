@@ -15,7 +15,7 @@ function buildCdpJwt(apiKeyName, privateKeyPem, requestMethod, requestPath) {
   const header = { alg: 'ES256', kid: apiKeyName, nonce: crypto.randomBytes(16).toString('hex'), typ: 'JWT' }
   const now = Math.floor(Date.now() / 1000)
   const uri = `${requestMethod} api.coinbase.com${requestPath}`
-  const payload = { sub: apiKeyName, iss: 'cdp', nbf: now, exp: now + 120, uri }
+  const payload = { sub: apiKeyName, iss: 'cdp', iat: now, nbf: now, exp: now + 120, uris: [uri] }
 
   const encode = (obj) => Buffer.from(JSON.stringify(obj)).toString('base64url')
   const unsigned = encode(header) + '.' + encode(payload)
