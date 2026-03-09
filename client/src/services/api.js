@@ -256,6 +256,11 @@ export async function fetchSnaptradeDemoHoldings() {
   return request('/api/snaptrade/demo/holdings')
 }
 
+// ── UOB Open Banking ──────────────────────────────────────────
+export async function fetchUobAccounts() {
+  return request('/api/uob/accounts')
+}
+
 // ── AI Chat ───────────────────────────────────────────────────
 export async function sendChatMessage(messages, portfolioContext = null) {
   return request('/api/chat', {

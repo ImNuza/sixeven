@@ -1076,6 +1076,54 @@ HARD RULES:
     res.json({ holdings: getDemoHoldings(), source: 'demo' })
   })
 
+  // ── UOB Open Banking ────────────────────────────────────────
+  app.get('/api/uob/accounts', requireAuth, async (req, res) => {
+    const UOB_DEMO = {
+      accounts: [{
+        accountNumber: '9013531494',
+        accountType: 'D',
+        accountName: 'UOB Current Account',
+        currency: 'SGD',
+        balance: 48250.00,
+        availableBalance: 48250.00,
+      }],
+      source: 'demo',
+    }
+
+    const authToken = process.env.UOB_AUTH_TOKEN
+    if (!authToken) return res.json(UOB_DEMO)
+
+    try {
+      const txRef = `SS-${Date.now()}-${req.user.id}`
+      const payload = {
+        transactionReference: txRef,
+        accounts: [{
+          accountNumber: process.env.UOB_ACCOUNT_NUMBER || '9013531494',
+          accountType: process.env.UOB_ACCOUNT_TYPE || 'D',
+          accountCurrency: 'SGD',
+        }],
+      }
+      const { data } = await axios.post(
+        `${process.env.UOB_API_BASE || 'https://sandbox.uobgroup.com/api/v1'}/accounts/summary`,
+        payload,
+        {
+          headers: {
+            Authorization: `Bearer ${authToken}`,
+            'x-app-id': process.env.UOB_APP_ID || '',
+            'x-api-key': process.env.UOB_API_KEY || '',
+            'Content-Type': 'application/json',
+          },
+          timeout: 10000,
+        }
+      )
+      const accounts = data?.accounts || data?.data?.accounts || (Array.isArray(data) ? data : [data])
+      res.json({ accounts, source: 'uob_live' })
+    } catch (err) {
+      console.error('[UOB] API error:', err.message)
+      res.json(UOB_DEMO)
+    }
+  })
+
   // Purge expired revoked tokens every hour — keeps the denylist table small
   setInterval(async () => {
     try {

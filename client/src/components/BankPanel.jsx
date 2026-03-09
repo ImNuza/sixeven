@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
-import { Building2, ChevronDown, ChevronUp, Download, X, Check, Loader2, Landmark, CreditCard, TrendingUp, Trash2, Wifi } from 'lucide-react'
-import { createAsset, connectOcbc, fetchOcbcAccounts, fetchOcbcStatus, disconnectOcbc } from '../services/api.js'
+import { Building2, ChevronDown, ChevronUp, Download, X, Check, Loader2, Landmark, CreditCard, TrendingUp, Trash2, Wifi, RefreshCw } from 'lucide-react'
+import { createAsset, connectOcbc, fetchOcbcAccounts, fetchOcbcStatus, disconnectOcbc, fetchUobAccounts } from '../services/api.js'
 
 const BANKS = [
   { id: 'dbs',  name: 'DBS Bank',           country: 'SG', color: '#d3212d', logo: 'D' },
@@ -284,6 +284,123 @@ function OcbcLivePanel({ onImportDone }) {
   )
 }
 
+// ── UOB Live Integration Panel ────────────────────────────────
+function UobLivePanel({ onImportDone }) {
+  const [accounts, setAccounts] = useState([])
+  const [loading, setLoading]   = useState(true)
+  const [source, setSource]     = useState(null)
+  const [error, setError]       = useState('')
+  const [importedIds, setImportedIds] = useState(new Set())
+
+  async function load() {
+    try {
+      setLoading(true)
+      setError('')
+      const data = await fetchUobAccounts()
+      setAccounts(data?.accounts || [])
+      setSource(data?.source || 'demo')
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => { load() }, [])
+
+  async function importAccount(account) {
+    const key = account.accountNumber
+    if (importedIds.has(key)) return
+    const today = new Date().toISOString().split('T')[0]
+    await createAsset({
+      name: account.accountName || `UOB ${account.accountType === 'D' ? 'Current' : 'Savings'} Account`,
+      category: 'CASH',
+      ticker: null,
+      quantity: null,
+      value: Math.max(0, account.availableBalance ?? account.balance ?? 0),
+      cost:  Math.max(0, account.availableBalance ?? account.balance ?? 0),
+      date: today,
+      institution: 'UOB',
+      details: { accountType: account.accountType, currency: account.currency || 'SGD', mask: String(account.accountNumber || '').slice(-4), importedFrom: 'uob' },
+    })
+    setImportedIds(prev => new Set([...prev, key]))
+    onImportDone?.()
+  }
+
+  const UOB_BLUE = '#005baa'
+
+  return (
+    <div className="rounded-2xl border overflow-hidden mb-4" style={{ borderColor: `${UOB_BLUE}30`, background: `${UOB_BLUE}06` }}>
+      <div className="flex items-center justify-between px-5 py-3.5 border-b border-white/[0.05]">
+        <div className="flex items-center gap-3">
+          <div className="h-8 w-8 rounded-xl flex items-center justify-center text-sm font-bold" style={{ background: `${UOB_BLUE}20`, color: UOB_BLUE }}>U</div>
+          <div>
+            <p className="text-sm font-semibold text-white/90">UOB</p>
+            <p className="text-xs text-white/35">
+              {loading ? 'Loading accounts…' : error ? 'Connection error' : `${accounts.length} account${accounts.length !== 1 ? 's' : ''} · ${source === 'uob_live' ? 'Live' : 'Demo'}`}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {source === 'uob_live' && <Wifi className="h-3.5 w-3.5 text-emerald-400" />}
+          {source === 'demo' && <span className="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-yellow-400/10 text-yellow-400">Demo</span>}
+          <button onClick={load} disabled={loading} className="p-1.5 rounded-lg text-white/30 hover:text-white/70 hover:bg-white/[0.05] transition-colors disabled:opacity-40">
+            <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+          </button>
+        </div>
+      </div>
+
+      {error && <div className="px-5 py-3 text-xs text-red-400/80 bg-red-500/[0.04] border-b border-red-500/10">{error}</div>}
+
+      {!loading && accounts.length > 0 && (
+        <div className="px-4 py-3 space-y-0">
+          {accounts.map((a, i) => {
+            const key = a.accountNumber || i
+            const done = importedIds.has(key)
+            const bal = a.availableBalance ?? a.balance ?? 0
+            const currency = a.currency || 'SGD'
+            return (
+              <div key={key} className="flex items-center justify-between py-2.5 border-b border-white/[0.04] last:border-0">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="h-7 w-7 rounded-xl bg-white/[0.04] flex items-center justify-center flex-shrink-0">
+                    <Landmark className="h-3.5 w-3.5" style={{ color: UOB_BLUE }} />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-white/90">{a.accountName || 'UOB Account'}</p>
+                    <p className="text-xs text-white/35">{a.accountType === 'D' ? 'Current' : 'Savings'} ···{String(a.accountNumber || '').slice(-4)}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-4 flex-shrink-0">
+                  <p className="text-sm font-mono text-white/80 text-right">
+                    {currency} {Number(bal).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </p>
+                  {done ? (
+                    <span className="text-xs text-emerald-400 font-medium w-14 text-right">Added ✓</span>
+                  ) : (
+                    <button onClick={() => importAccount(a)} className="text-xs text-accent border border-accent/20 bg-accent/[0.08] rounded-lg px-2.5 py-1 hover:bg-accent/[0.18] transition-colors w-14 text-center">
+                      Import
+                    </button>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+          <button
+            onClick={() => accounts.forEach(a => importAccount(a))}
+            className="mt-2 w-full flex items-center justify-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.08] py-2 text-xs font-semibold text-emerald-400 hover:bg-emerald-500/[0.15] transition-colors"
+          >
+            <Download className="h-3.5 w-3.5" /> Import All Accounts
+          </button>
+        </div>
+      )}
+
+      {!loading && accounts.length === 0 && !error && (
+        <div className="px-5 py-4 text-xs text-white/30 text-center">No accounts returned</div>
+      )}
+    </div>
+  )
+}
+
 export default function BankPanel({ onImportDone }) {
   const [expanded, setExpanded] = useState(true)
   const [showModal, setShowModal] = useState(false)
@@ -358,9 +475,10 @@ export default function BankPanel({ onImportDone }) {
 
         {expanded && (
           <div className="px-6 pb-5 border-t border-white/[0.04]">
-            {/* OCBC Live Integration */}
+            {/* Live Bank Integrations */}
             <div className="pt-4">
               <OcbcLivePanel onImportDone={onImportDone} />
+              <UobLivePanel onImportDone={onImportDone} />
             </div>
 
             <div className="flex items-center gap-3 pb-4 flex-wrap">
