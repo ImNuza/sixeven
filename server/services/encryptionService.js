@@ -15,12 +15,16 @@ const IV_BYTES = 12    // 96-bit IV — optimal for GCM
 const TAG_BYTES = 16   // 128-bit auth tag — NIST recommended
 const VERSION = 'v1'
 
+// Crash-fast at startup if ENCRYPTION_KEY is missing or too short,
+// matching the same pattern as AUTH_SECRET in authService.js.
+const ENCRYPTION_KEY_HEX = process.env.ENCRYPTION_KEY
+if (!ENCRYPTION_KEY_HEX || ENCRYPTION_KEY_HEX.length < 64) {
+  throw new Error('[encryptionService] ENCRYPTION_KEY must be a 32-byte (64 hex char) value in .env')
+}
+const KEY_BUF = Buffer.from(ENCRYPTION_KEY_HEX, 'hex')
+
 function getKey() {
-  const hex = process.env.ENCRYPTION_KEY
-  if (!hex || hex.length < 64) {
-    throw new Error('[encryptionService] ENCRYPTION_KEY must be a 32-byte (64 hex char) value in .env')
-  }
-  return Buffer.from(hex, 'hex')
+  return KEY_BUF
 }
 
 /**

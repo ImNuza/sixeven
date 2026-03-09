@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState } from 'react'
+import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { clearStoredSession, loadStoredSession, saveStoredSession } from './storage.js'
 import {
   changePassword as changePasswordRequest,
@@ -19,6 +19,8 @@ export function AuthProvider({ children }) {
     return stored?.user ? stored : null
   })
   const [isReady, setIsReady] = useState(false)
+  // Prevents restoreSession from overwriting a session set by an explicit login/register call.
+  const explicitAuthRef = useRef(false)
 
   useEffect(() => {
     let cancelled = false
@@ -30,10 +32,13 @@ export function AuthProvider({ children }) {
         const response = await fetchCurrentUser()
         const nextSession = { user: response.user }
         saveStoredSession(nextSession)
-        if (!cancelled) setSession(nextSession)
+        if (!cancelled && !explicitAuthRef.current) setSession(nextSession)
       } catch {
-        clearStoredSession()
-        if (!cancelled) setSession(null)
+        // Don't clear session if the user just logged in / registered
+        if (!explicitAuthRef.current) {
+          clearStoredSession()
+          if (!cancelled) setSession(null)
+        }
       } finally {
         if (!cancelled) setIsReady(true)
       }
@@ -54,18 +59,22 @@ export function AuthProvider({ children }) {
   }, [])
 
   async function login(credentials) {
+    explicitAuthRef.current = true
     const nextSession = await loginUser(credentials)
     const safe = { user: nextSession.user }
     saveStoredSession(safe)
     setSession(safe)
+    setIsReady(true)
     return nextSession
   }
 
   async function register(credentials) {
+    explicitAuthRef.current = true
     const nextSession = await registerUser(credentials)
     const safe = { user: nextSession.user }
     saveStoredSession(safe)
     setSession(safe)
+    setIsReady(true)
     return nextSession
   }
 

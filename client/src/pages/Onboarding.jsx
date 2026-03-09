@@ -17,7 +17,8 @@ const QUESTIONS = [
     id: 'crypto',
     icon: Bitcoin,
     color: '#F7931A',
-    category: 'Crypto',
+    category: 'CRYPTO',
+    label: 'Crypto',
     question: 'Do you own any cryptocurrency?',
     sub: 'Think Bitcoin, Ethereum, or any altcoins.',
     followUp: 'Roughly how much is your crypto portfolio worth today? (SGD)',
@@ -28,7 +29,8 @@ const QUESTIONS = [
     id: 'stocks',
     icon: TrendingUp,
     color: '#10B981',
-    category: 'Stocks',
+    category: 'STOCKS',
+    label: 'Stocks',
     question: 'Do you invest in stocks or ETFs?',
     sub: 'Including SGX-listed, US equities, unit trusts, or robo-advisors.',
     followUp: 'What is the current market value of your stock/ETF holdings? (SGD)',
@@ -39,7 +41,8 @@ const QUESTIONS = [
     id: 'property',
     icon: Building2,
     color: '#8B5CF6',
-    category: 'Property',
+    category: 'PROPERTY',
+    label: 'Property',
     question: 'Do you own any property?',
     sub: 'HDB flat, condo, landed, or overseas real estate.',
     followUp: 'What is the estimated current value of your property? (SGD)',
@@ -50,7 +53,8 @@ const QUESTIONS = [
     id: 'cpf',
     icon: Shield,
     color: '#06B6D4',
-    category: 'CPF / Retirement',
+    category: 'CPF',
+    label: 'CPF / Retirement',
     question: 'Do you have CPF savings?',
     sub: 'Ordinary Account, Special Account, or MediSave.',
     followUp: 'What is your approximate total CPF balance across all accounts? (SGD)',
@@ -61,7 +65,8 @@ const QUESTIONS = [
     id: 'cash',
     icon: Banknote,
     color: '#22C55E',
-    category: 'Cash & Savings',
+    category: 'CASH',
+    label: 'Cash & Savings',
     question: 'How much cash and savings do you have?',
     sub: 'Bank accounts, fixed deposits, SSBs, T-bills.',
     followUp: 'Total liquid savings you\'d like to track? (SGD)',
@@ -72,7 +77,8 @@ const QUESTIONS = [
     id: 'bonds',
     icon: BarChart2,
     color: '#F59E0B',
-    category: 'Bonds',
+    category: 'BONDS',
+    label: 'Bonds',
     question: 'Do you hold any bonds or fixed income?',
     sub: 'Corporate bonds, Singapore Savings Bonds, REITs.',
     followUp: 'Approximate value of your bond/fixed income holdings? (SGD)',
@@ -310,18 +316,25 @@ export default function Onboarding() {
     setSaving(true)
     try {
       const today = new Date().toISOString().slice(0, 10)
+      // Category-specific details required by server validation
+      const detailsFor = {
+        CPF: { accountType: 'Combined' },
+        PROPERTY: { address: 'Singapore' },
+        BONDS: { issuer: 'Various', maturityDate: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10) },
+      }
       await Promise.all(
         QUESTIONS
           .filter(q => parseFloat(answers[q.id]) > 0)
           .map(q =>
             createAsset({
-              name: q.category,
+              name: q.label,
               category: q.category,
               value: parseFloat(answers[q.id]),
               cost: parseFloat(answers[q.id]),
               quantity: 1,
               date: today,
               institution: 'Onboarding',
+              ...(detailsFor[q.category] ? { details: detailsFor[q.category] } : {}),
             }).catch(() => null)
           )
       )
@@ -443,7 +456,7 @@ export default function Onboarding() {
               ) : (
                 <>
                   <p style={{ fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.2em', color: q.color, textTransform: 'uppercase', marginBottom: '0.6rem' }}>
-                    {q.category}
+                    {q.label}
                   </p>
                   <h2 style={{ fontSize: 'clamp(1.1rem, 2.5vw, 1.4rem)', fontWeight: 700, lineHeight: 1.35, marginBottom: '1.5rem' }}>
                     {q.followUp}
@@ -535,7 +548,7 @@ export default function Onboarding() {
                   borderRadius: '999px', padding: '0.35rem 0.8rem', fontSize: '0.78rem', color: q.color,
                 }}>
                   <q.icon size={12} strokeWidth={2} />
-                  {q.category}
+                  {q.label}
                 </div>
               ))}
             </div>

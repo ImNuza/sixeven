@@ -104,6 +104,11 @@ async function refreshUserPricesInternal(userId, snapshotSource = 'price_refresh
           const priceSgd = coinData.sgd || coinData.usd * usdSgd
           const priceUsd = coinData.usd
           await upsertPrice(client, geckoId, priceUsd, priceSgd)
+          // Also cache under the original ticker so JOINs on a.ticker = pc.symbol work
+          // regardless of whether the asset stores "BTC" or "bitcoin"
+          if (asset.ticker !== geckoId) {
+            await upsertPrice(client, asset.ticker, priceUsd, priceSgd)
+          }
           await updateAssetValue(client, asset.id, priceSgd, parseFloat(asset.quantity))
         }
       } catch {
