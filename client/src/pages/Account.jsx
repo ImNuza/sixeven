@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { KeyRound, Mail, Moon, SunMedium, Trash2, Link2, ChevronDown, Lock } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext.jsx'
@@ -8,6 +8,7 @@ import BankPanel from '../components/BankPanel'
 import WalletPanel from '../components/WalletPanel'
 import CexPanel from '../components/CexPanel'
 import MoomooPanel from '../components/MoomooPanel'
+import { fetchOnboardingDemoLinks } from '../services/api.js'
 
 function initialsFor(username) {
   const letters = String(username || 'SS')
@@ -37,8 +38,25 @@ export default function Account() {
   const [isDeleting, setIsDeleting] = useState(false)
   const [showConnect, setShowConnect] = useState(false)
   const [importCount, setImportCount] = useState(0)
+  const [demoLinks, setDemoLinks] = useState([])
 
   const handleImportDone = useCallback(() => setImportCount(n => n + 1), [])
+
+  useEffect(() => {
+    let cancelled = false
+    async function loadDemoLinks() {
+      try {
+        const data = await fetchOnboardingDemoLinks()
+        if (cancelled) return
+        const enabled = (data?.providers || []).filter((provider) => provider.enabled)
+        setDemoLinks(enabled)
+      } catch {
+        if (!cancelled) setDemoLinks([])
+      }
+    }
+    loadDemoLinks()
+    return () => { cancelled = true }
+  }, [user?.id])
 
   async function handleProfileSubmit(event) {
     event.preventDefault()
@@ -151,6 +169,14 @@ export default function Account() {
             <p className="text-xs pt-4" style={{ color: 'var(--app-text-muted)' }}>
               Your linked financial accounts are stored privately and only accessible when you are signed in. Data is never shared across users.
             </p>
+            {demoLinks.length > 0 && (
+              <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-300 mb-1">Onboarding Demo Links</p>
+                <p className="text-sm text-emerald-100">
+                  {demoLinks.map((provider) => provider.provider === 'moomoo_sg' ? 'Demo moomoo SG' : 'Demo crypto wallet').join(' · ')} connected
+                </p>
+              </div>
+            )}
             <SingpassPanel onImportDone={handleImportDone} />
             <BankPanel onImportDone={handleImportDone} />
             <WalletPanel onImportDone={handleImportDone} />

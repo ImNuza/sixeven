@@ -157,6 +157,19 @@ export const schema = `
   );
 
   CREATE INDEX IF NOT EXISTS idx_snaptrade_users_user ON snaptrade_users (user_id);
+
+  CREATE TABLE IF NOT EXISTS linked_demo_accounts (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    provider VARCHAR(40) NOT NULL,
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    connected_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(user_id, provider)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_linked_demo_accounts_user ON linked_demo_accounts (user_id);
 `
 
 export async function ensureSystemSeedUser(client) {

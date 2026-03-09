@@ -40,11 +40,12 @@ const DEFAULT_WIDGETS = [
   { id: 'holdings',   label: 'Top Holdings',     span: 'full' },
 ]
 
-const STORAGE_KEY = 'dashboard_widgets_v1'
+const STORAGE_KEY_PREFIX = 'dashboard_widgets_v1'
 
-function loadWidgets() {
+function loadWidgets(userId) {
+  const storageKey = `${STORAGE_KEY_PREFIX}:${userId || 'anon'}`
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
+    const raw = localStorage.getItem(storageKey)
     if (!raw) return DEFAULT_WIDGETS
     const saved = JSON.parse(raw)
     // merge saved order+visibility with default widget set
@@ -53,8 +54,9 @@ function loadWidgets() {
   } catch { return DEFAULT_WIDGETS }
 }
 
-function saveWidgets(widgets) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(widgets.map(({ id, visible }) => ({ id, visible }))))
+function saveWidgets(widgets, userId) {
+  const storageKey = `${STORAGE_KEY_PREFIX}:${userId || 'anon'}`
+  localStorage.setItem(storageKey, JSON.stringify(widgets.map(({ id, visible }) => ({ id, visible }))))
 }
 
 function formatCurrency(v) {
@@ -198,7 +200,7 @@ export default function Dashboard() {
   const [error, setError] = useState('')
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [activeRange, setActiveRange] = useState('ALL')
-  const [widgets, setWidgets] = useState(loadWidgets)
+  const [widgets, setWidgets] = useState(() => loadWidgets(user?.id))
   const [showCustomize, setShowCustomize] = useState(false)
   const [viewMode, setViewMode] = useState('client') // 'client' | 'advisor'
 
@@ -227,6 +229,10 @@ export default function Dashboard() {
 
   useEffect(() => {
     setOnboardingProfile(loadOnboardingProfile(user?.id))
+  }, [user?.id])
+
+  useEffect(() => {
+    setWidgets(loadWidgets(user?.id))
   }, [user?.id])
 
   useEffect(() => {
@@ -315,7 +321,7 @@ export default function Dashboard() {
 
   function handleWidgetChange(newWidgets) {
     setWidgets(newWidgets)
-    saveWidgets(newWidgets)
+    saveWidgets(newWidgets, user?.id)
     notify({ type: 'info', title: 'Dashboard updated', message: 'Your layout has been saved.' })
   }
 

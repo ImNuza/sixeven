@@ -7,10 +7,11 @@ import {
 import {
   connectOcbc,
   createAsset,
+  fetchOnboardingDemoLinks,
   fetchMoomooPositions,
-  fetchMomooDemoPositions,
   fetchSingpassAuthUrl,
   lookupPropertyByPostcode,
+  saveOnboardingDemoLinks,
   saveWalletConnection,
   updateProfile,
 } from '../services/api.js'
@@ -100,6 +101,8 @@ const INITIAL_VALUES = {
   walletAddresses: '',
   otherWalletNotes: '',
   linkSingpassNow: false,
+  useDemoMoomoo: false,
+  useDemoCryptoWallet: false,
   moomooOpenDUrl: 'http://127.0.0.1:33333',
   termsAccepted: false,
 }
@@ -248,6 +251,10 @@ function buildProfilePayload(values, user, propertyLookup, integrationState) {
     ocbcLinked: integrationState.ocbcConnected,
     moomooImported: integrationState.moomooImported,
     moomooAccountId: integrationState.moomooAccountId,
+    selectedDemoProviders: [
+      values.useDemoMoomoo ? 'moomoo_sg' : null,
+      values.useDemoCryptoWallet ? 'crypto_wallet' : null,
+    ].filter(Boolean),
     completedAt: new Date().toISOString(),
     estimatedNetWorthTracked: totalTracked,
   }
@@ -333,9 +340,7 @@ async function persistPortfolioAssets(values, propertyLookup) {
 }
 
 async function importMoomooPortfolio(payload) {
-  const data = payload.source === 'demo'
-    ? await fetchMomooDemoPositions()
-    : await fetchMoomooPositions(payload.openDUrl)
+  const data = await fetchMoomooPositions(payload.openDUrl)
 
   const today = new Date().toISOString().split('T')[0]
   for (const position of data.positions || []) {
@@ -349,7 +354,7 @@ async function importMoomooPortfolio(payload) {
       value: Math.round(position.marketValue * rate * 100) / 100,
       cost: position.avgCost > 0 ? Math.round(position.avgCost * position.quantity * rate * 100) / 100 : Math.round(position.marketValue * rate * 100) / 100,
       date: today,
-      institution: payload.source === 'demo' ? 'moomoo SG (Demo)' : 'moomoo SG',
+      institution: 'moomoo SG',
       details: {
         importedFrom: 'moomoo',
         currency: position.currency,
@@ -431,6 +436,26 @@ export default function Onboarding() {
     }
   }, [values.hasOtherDebts])
 
+  useEffect(() => {
+    let cancelled = false
+    async function hydrateDemoSelections() {
+      try {
+        const data = await fetchOnboardingDemoLinks()
+        if (cancelled) return
+        const enabled = new Set((data?.providers || []).filter((item) => item.enabled).map((item) => item.provider))
+        setValues((current) => ({
+          ...current,
+          useDemoMoomoo: enabled.has('moomoo_sg'),
+          useDemoCryptoWallet: enabled.has('crypto_wallet'),
+        }))
+      } catch {
+        // Ignore hydration failures and keep defaults.
+      }
+    }
+    hydrateDemoSelections()
+    return () => { cancelled = true }
+  }, [])
+
   function setField(key, value) {
     setValues((current) => ({ ...current, [key]: value }))
   }
@@ -498,10 +523,10 @@ export default function Onboarding() {
     }
   }
 
-  async function handleImportMoomoo(source) {
+  async function handleImportMoomoo() {
     setIntegrationState((current) => ({ ...current, moomooLoading: true, moomooError: '' }))
     try {
-      const data = await importMoomooPortfolio({ source, openDUrl: values.moomooOpenDUrl })
+      const data = await importMoomooPortfolio({ openDUrl: values.moomooOpenDUrl })
       setIntegrationState((current) => ({
         ...current,
         moomooLoading: false,
@@ -596,6 +621,14 @@ export default function Onboarding() {
           await saveWalletConnection(address, 1, 'Onboarding Wallet')
         }
       }
+      const selectedDemoProviders = [
+        values.useDemoMoomoo ? 'moomoo_sg' : null,
+        values.useDemoCryptoWallet ? 'crypto_wallet' : null,
+      ].filter(Boolean)
+      await saveOnboardingDemoLinks(selectedDemoProviders, {
+        moomoo_sg: values.useDemoMoomoo ? { source: 'onboarding' } : {},
+        crypto_wallet: values.useDemoCryptoWallet ? { source: 'onboarding' } : {},
+      })
       await persistPortfolioAssets(values, propertyLookupState.data)
       setCompleted(true)
     } catch (err) {
@@ -897,7 +930,7 @@ export default function Onboarding() {
         )
       case 'integrations':
         return (
-          <StepShell step={stepIndex} total={totalProgressSteps} title="Optional account connections and imports" description="You can connect Singpass now and import moomoo positions during onboarding, or do it later from Account.">
+          <StepShell step={stepIndex} total={totalProgressSteps} title="Optional account connections and imports" description="You can connect Singpass and choose demo accounts now, or do it later from Account.">
             <div style={{ display: 'grid', gap: '1rem' }}>
               <div style={{ border: '1px solid rgba(255,255,255,0.1)', borderRadius: '1rem', padding: '1rem', background: 'rgba(255,255,255,0.03)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', marginBottom: '0.8rem' }}>
@@ -919,19 +952,41 @@ export default function Onboarding() {
                 </div>
                 <input value={values.moomooOpenDUrl} onChange={(event) => setField('moomooOpenDUrl', event.target.value)} placeholder="OpenD URL (e.g. http://127.0.0.1:33333)" style={{ ...inputStyle(), marginBottom: '0.8rem' }} />
                 <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-                  <button type="button" onClick={() => handleImportMoomoo('live')} disabled={integrationState.moomooLoading} style={buttonStyle(false)}>
+                  <button type="button" onClick={handleImportMoomoo} disabled={integrationState.moomooLoading} style={buttonStyle(false)}>
                     {integrationState.moomooLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Building2 className="h-4 w-4" />}
                     Import via OpenD
-                  </button>
-                  <button type="button" onClick={() => handleImportMoomoo('demo')} disabled={integrationState.moomooLoading} style={buttonStyle(false)}>
-                    {integrationState.moomooLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-                    Load demo portfolio
                   </button>
                 </div>
                 {integrationState.moomooImported && (
                   <p style={{ color: '#86efac', marginTop: '0.6rem' }}>moomoo portfolio imported{integrationState.moomooAccountId ? ` (${integrationState.moomooAccountId})` : ''}.</p>
                 )}
                 {integrationState.moomooError && <p style={{ color: '#fca5a5', marginTop: '0.6rem' }}>{integrationState.moomooError}</p>}
+              </div>
+
+              <div style={{ border: '1px solid rgba(255,255,255,0.1)', borderRadius: '1rem', padding: '1rem', background: 'rgba(255,255,255,0.03)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', marginBottom: '0.8rem' }}>
+                  <CheckCircle2 className="h-4 w-4" style={{ color: '#86efac' }} />
+                  <strong>Demo accounts (optional)</strong>
+                </div>
+                <p style={{ color: 'rgba(255,255,255,0.52)', marginBottom: '0.8rem' }}>
+                  Select demo account sources to auto-link when onboarding completes.
+                </p>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.7rem', marginBottom: '0.6rem', color: 'rgba(255,255,255,0.8)' }}>
+                  <input
+                    type="checkbox"
+                    checked={values.useDemoMoomoo}
+                    onChange={(event) => setField('useDemoMoomoo', event.target.checked)}
+                  />
+                  Demo moomoo SG account
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.7rem', color: 'rgba(255,255,255,0.8)' }}>
+                  <input
+                    type="checkbox"
+                    checked={values.useDemoCryptoWallet}
+                    onChange={(event) => setField('useDemoCryptoWallet', event.target.checked)}
+                  />
+                  Demo crypto wallet
+                </label>
               </div>
             </div>
           </StepShell>

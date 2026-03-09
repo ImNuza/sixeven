@@ -329,3 +329,14 @@ export async function disconnectSingpass() {
 export async function lookupPropertyByPostcode(postcode) {
   return request(`/api/property/lookup?postcode=${encodeURIComponent(postcode)}`)
 }
+
+export async function fetchOnboardingDemoLinks() {
+  return request('/api/onboarding/demo-links')
+}
+
+export async function saveOnboardingDemoLinks(selectedProviders = [], metadataByProvider = {}) {
+  return request('/api/onboarding/demo-links', {
+    method: 'POST',
+    body: JSON.stringify({ selectedProviders, metadataByProvider }),
+  })
+}

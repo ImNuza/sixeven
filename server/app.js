@@ -11,7 +11,7 @@ import { createAssetsController } from './controllers/assetsController.js'
 import { createAuthController } from './controllers/authController.js'
 import { createAuthMiddleware } from './middleware/auth.js'
 import { getInsightsPayload } from './services/insightsService.js'
-import { decrypt, decryptJSON } from './services/encryptionService.js'
+import { decrypt, decryptJSON, encrypt, encryptJSON } from './services/encryptionService.js'
 
 // ── Plaid client ──────────────────────────────────────────────
 function makePlaidClient() {
@@ -55,6 +55,218 @@ const ALCHEMY_NETWORKS = {
   137: 'polygon-mainnet',
   42161: 'arb-mainnet',
   56: 'bnb-mainnet',
+}
+
+const DEMO_PROVIDER = Object.freeze({
+  MOOMOO_SG: 'moomoo_sg',
+  CRYPTO_WALLET: 'crypto_wallet',
+})
+
+const DEMO_IMPORT_TAG = Object.freeze({
+  [DEMO_PROVIDER.MOOMOO_SG]: 'demo-moomoo-sg',
+  [DEMO_PROVIDER.CRYPTO_WALLET]: 'demo-crypto-wallet',
+})
+
+const SUPPORTED_DEMO_PROVIDERS = new Set(Object.values(DEMO_PROVIDER))
+const USD_SGD = 1.35
+
+function parseStoredJson(raw, fallback = {}) {
+  if (raw == null) return fallback
+  if (typeof raw === 'object') return raw
+  try {
+    return JSON.parse(String(raw))
+  } catch {
+    return fallback
+  }
+}
+
+function normalizeSelectedDemoProviders(input = []) {
+  if (!Array.isArray(input)) {
+    return []
+  }
+
+  const seen = new Set()
+  const selected = []
+  for (const value of input) {
+    const provider = String(value || '').trim().toLowerCase()
+    if (!SUPPORTED_DEMO_PROVIDERS.has(provider) || seen.has(provider)) {
+      continue
+    }
+    selected.push(provider)
+    seen.add(provider)
+  }
+  return selected
+}
+
+function providerAssetKey(asset) {
+  const ticker = String(asset.ticker || '').trim().toUpperCase()
+  const name = String(asset.name || '').trim().toLowerCase()
+  if (ticker) return `ticker:${ticker}`
+  return `name:${name}`
+}
+
+async function listUserAssetsForImport(pool, userId) {
+  const { rows } = await pool.query(
+    'SELECT id, name, category, ticker, quantity, value, cost, date, institution, details FROM assets WHERE user_id = $1',
+    [userId]
+  )
+  return rows.map((row) => ({
+    ...row,
+    institution: decrypt(row.institution),
+    details: decryptJSON(row.details),
+  }))
+}
+
+async function removeImportedAssetsForTag(pool, userId, importedFrom) {
+  const assets = await listUserAssetsForImport(pool, userId)
+  const ids = assets
+    .filter((asset) => asset.details?.importedFrom === importedFrom)
+    .map((asset) => asset.id)
+
+  for (const id of ids) {
+    await pool.query('DELETE FROM assets WHERE id = $1 AND user_id = $2', [id, userId])
+  }
+}
+
+async function upsertImportedAssets(pool, userId, importedFrom, desiredAssets) {
+  const existing = await listUserAssetsForImport(pool, userId)
+  const existingByKey = new Map(
+    existing
+      .filter((asset) => asset.details?.importedFrom === importedFrom)
+      .map((asset) => [providerAssetKey(asset), asset])
+  )
+
+  const desiredKeys = new Set()
+  for (const asset of desiredAssets) {
+    const key = providerAssetKey(asset)
+    desiredKeys.add(key)
+    const match = existingByKey.get(key)
+    const safeInstitution = encrypt(asset.institution || null)
+    const safeDetails = encryptJSON(asset.details || {})
+
+    if (match) {
+      await pool.query(
+        `UPDATE assets
+         SET name = $1, category = $2, ticker = $3, quantity = $4, value = $5, cost = $6, date = $7, institution = $8, details = $9
+         WHERE id = $10 AND user_id = $11`,
+        [
+          asset.name,
+          asset.category,
+          asset.ticker || null,
+          asset.quantity == null ? null : Number(asset.quantity),
+          Number(asset.value || 0),
+          Number(asset.cost || 0),
+          asset.date,
+          safeInstitution,
+          safeDetails,
+          match.id,
+          userId,
+        ]
+      )
+      continue
+    }
+
+    await pool.query(
+      `INSERT INTO assets (user_id, name, category, ticker, quantity, value, cost, date, institution, details)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      [
+        userId,
+        asset.name,
+        asset.category,
+        asset.ticker || null,
+        asset.quantity == null ? null : Number(asset.quantity),
+        Number(asset.value || 0),
+        Number(asset.cost || 0),
+        asset.date,
+        safeInstitution,
+        safeDetails,
+      ]
+    )
+  }
+
+  for (const [key, asset] of existingByKey.entries()) {
+    if (desiredKeys.has(key)) continue
+    await pool.query('DELETE FROM assets WHERE id = $1 AND user_id = $2', [asset.id, userId])
+  }
+}
+
+async function buildDemoMoomooAssets() {
+  const { getDemoPositions } = await import('./services/moomooService.js')
+  const data = getDemoPositions()
+  const today = new Date().toISOString().slice(0, 10)
+  return (data.positions || []).map((position) => {
+    const isSgd = String(position.currency || '').toUpperCase() === 'SGD'
+    const rate = isSgd ? 1 : USD_SGD
+    const value = Math.round(Number(position.marketValue || 0) * rate * 100) / 100
+    const cost = position.avgCost > 0
+      ? Math.round(Number(position.avgCost || 0) * Number(position.quantity || 0) * rate * 100) / 100
+      : value
+
+    return {
+      name: position.name || position.ticker || 'Demo Position',
+      category: 'STOCKS',
+      ticker: position.ticker || null,
+      quantity: Number(position.quantity || 0),
+      value,
+      cost,
+      date: today,
+      institution: 'moomoo SG (Demo)',
+      details: {
+        importedFrom: DEMO_IMPORT_TAG[DEMO_PROVIDER.MOOMOO_SG],
+        source: 'onboarding-demo',
+        accountId: data.accountId || null,
+        currency: position.currency || null,
+        originalCode: position.code || null,
+      },
+    }
+  })
+}
+
+async function buildDemoCryptoWalletAssets() {
+  const { getDemoBalances } = await import('./services/cexService.js')
+  const today = new Date().toISOString().slice(0, 10)
+  return getDemoBalances().map((token) => {
+    const value = Math.round(Number(token.nativeValue || 0) * USD_SGD * 100) / 100
+    return {
+      name: token.name || token.symbol || 'Demo Crypto',
+      category: 'CRYPTO',
+      ticker: token.coingeckoId || String(token.symbol || '').toLowerCase(),
+      quantity: Number(token.balance || 0),
+      value,
+      cost: value,
+      date: today,
+      institution: 'Crypto Wallet (Demo)',
+      details: {
+        importedFrom: DEMO_IMPORT_TAG[DEMO_PROVIDER.CRYPTO_WALLET],
+        source: 'onboarding-demo',
+        symbol: token.symbol || null,
+      },
+    }
+  })
+}
+
+async function syncDemoProviderAssets(pool, userId, selectedProviders) {
+  if (selectedProviders.includes(DEMO_PROVIDER.MOOMOO_SG)) {
+    await upsertImportedAssets(
+      pool,
+      userId,
+      DEMO_IMPORT_TAG[DEMO_PROVIDER.MOOMOO_SG],
+      await buildDemoMoomooAssets()
+    )
+  } else {
+    await removeImportedAssetsForTag(pool, userId, DEMO_IMPORT_TAG[DEMO_PROVIDER.MOOMOO_SG])
+  }
+
+  if (selectedProviders.includes(DEMO_PROVIDER.CRYPTO_WALLET)) {
+    await upsertImportedAssets(
+      pool,
+      userId,
+      DEMO_IMPORT_TAG[DEMO_PROVIDER.CRYPTO_WALLET],
+      await buildDemoCryptoWalletAssets()
+    )
+  } else {
+    await removeImportedAssetsForTag(pool, userId, DEMO_IMPORT_TAG[DEMO_PROVIDER.CRYPTO_WALLET])
+  }
 }
 
 async function alchemyRpc(network, method, params) {
@@ -242,11 +454,19 @@ export function createApp({
         role: ['user', 'assistant', 'system'].includes(m.role) ? m.role : 'user',
         content: String(m.content || '').slice(0, MAX_MSG_LEN),
       }))
-      const apiKey = process.env.FEATHERLESS_API_KEY
-      if (!apiKey) return res.status(503).json({ error: 'AI service not configured' })
+      const apiKey = process.env.AI_PROVIDER_API_KEY || process.env.FEATHERLESS_API_KEY
+      const baseURL = process.env.AI_PROVIDER_BASE_URL || process.env.FEATHERLESS_BASE_URL || 'https://api.featherless.ai/v1'
+      const model = process.env.AI_MODEL || process.env.FEATHERLESS_MODEL || 'perplexity-ai/r1-1776-distill-llama-70b'
+      const timeoutMs = Number(process.env.AI_TIMEOUT_MS || 30000)
+
+      if (!apiKey || !baseURL || !model) {
+        return res.status(503).json({
+          error: 'AI service not configured. Set AI_PROVIDER_API_KEY, AI_PROVIDER_BASE_URL, and AI_MODEL.',
+        })
+      }
 
       const { default: OpenAI } = await import('openai')
-      const openai = new OpenAI({ baseURL: 'https://api.featherless.ai/v1', apiKey })
+      const openai = new OpenAI({ baseURL, apiKey, timeout: timeoutMs })
 
       // Guard: reject clearly off-topic messages before hitting the model
       const lastUserMsg = [...safeMessages].reverse().find(m => m.role === 'user')?.content?.toLowerCase() || ''
@@ -288,15 +508,120 @@ HARD RULES:
       }
 
       const completion = await openai.chat.completions.create({
-        model: 'perplexity-ai/r1-1776-distill-llama-70b',
+        model,
         messages: [...systemMessages, ...safeMessages],
         max_tokens: 700,
         temperature: 0.4,
       })
 
-      res.json({ reply: completion.choices[0].message.content })
+      const reply = completion?.choices?.[0]?.message?.content
+      if (!reply || !String(reply).trim()) {
+        return res.status(502).json({ error: 'AI provider returned an empty response.' })
+      }
+
+      res.json({ reply })
     } catch (err) {
-      res.status(500).json({ error: err.message || 'AI request failed' })
+      const status = Number(err?.status || err?.response?.status || 500)
+      const message = err?.response?.data?.error?.message || err?.message || 'AI request failed'
+      if (status === 401 || status === 403) {
+        return res.status(502).json({ error: 'AI provider rejected the request. Check API key and model access.' })
+      }
+      if (status === 429) {
+        return res.status(429).json({ error: 'AI provider rate limit reached. Please retry shortly.' })
+      }
+      if (status >= 400 && status < 500) {
+        return res.status(400).json({ error: `AI request invalid: ${message}` })
+      }
+      res.status(502).json({ error: `AI provider request failed: ${message}` })
+    }
+  })
+
+  app.get('/api/onboarding/demo-links', requireAuth, async (req, res) => {
+    try {
+      const { rows } = await pool.query(
+        `SELECT provider, enabled, metadata, connected_at, updated_at
+         FROM linked_demo_accounts
+         WHERE user_id = $1
+         ORDER BY provider ASC`,
+        [req.user.id]
+      )
+
+      res.json({
+        providers: rows.map((row) => ({
+          provider: row.provider,
+          enabled: Boolean(row.enabled),
+          metadata: parseStoredJson(row.metadata, {}),
+          connectedAt: row.connected_at,
+          updatedAt: row.updated_at,
+        })),
+      })
+    } catch (err) {
+      res.status(500).json({ error: err.message || 'Failed to load demo links.' })
+    }
+  })
+
+  app.post('/api/onboarding/demo-links', requireAuth, async (req, res) => {
+    const selectedProviders = normalizeSelectedDemoProviders(req.body?.selectedProviders)
+    const selectedSet = new Set(selectedProviders)
+    const metadataByProvider = parseStoredJson(req.body?.metadataByProvider, {})
+    const client = await pool.connect()
+
+    try {
+      await client.query('BEGIN')
+      const { rows: existing } = await client.query(
+        'SELECT provider FROM linked_demo_accounts WHERE user_id = $1',
+        [req.user.id]
+      )
+      const existingSet = new Set(existing.map((row) => row.provider))
+
+      for (const provider of SUPPORTED_DEMO_PROVIDERS) {
+        const enabled = selectedSet.has(provider)
+        const metadata = parseStoredJson(metadataByProvider?.[provider], {})
+
+        if (existingSet.has(provider)) {
+          await client.query(
+            `UPDATE linked_demo_accounts
+             SET enabled = $1, metadata = $2, updated_at = CURRENT_TIMESTAMP
+             WHERE user_id = $3 AND provider = $4`,
+            [enabled, JSON.stringify(metadata), req.user.id, provider]
+          )
+          continue
+        }
+
+        await client.query(
+          `INSERT INTO linked_demo_accounts (user_id, provider, enabled, metadata)
+           VALUES ($1, $2, $3, $4)`,
+          [req.user.id, provider, enabled, JSON.stringify(metadata)]
+        )
+      }
+
+      await syncDemoProviderAssets(client, req.user.id, selectedProviders)
+      await recordNetWorthSnapshot(req.user.id, 'onboarding_demo_sync', client)
+      await client.query('COMMIT')
+
+      const { rows } = await client.query(
+        `SELECT provider, enabled, metadata, connected_at, updated_at
+         FROM linked_demo_accounts
+         WHERE user_id = $1
+         ORDER BY provider ASC`,
+        [req.user.id]
+      )
+
+      res.json({
+        selectedProviders,
+        providers: rows.map((row) => ({
+          provider: row.provider,
+          enabled: Boolean(row.enabled),
+          metadata: parseStoredJson(row.metadata, {}),
+          connectedAt: row.connected_at,
+          updatedAt: row.updated_at,
+        })),
+      })
+    } catch (err) {
+      await client.query('ROLLBACK')
+      res.status(500).json({ error: err.message || 'Failed to save onboarding demo links.' })
+    } finally {
+      client.release()
     }
   })
 
