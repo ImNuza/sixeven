@@ -80,10 +80,11 @@ function WalletCard({ connection, onRemove, onRefresh }) {
       // Try Zerion first (multi-chain, richer data in 1 call)
       try {
         const data = await fetchWalletPortfolio(connection.address)
-        if (data?.tokens?.length) {
+        const positions = data?.positions || data?.tokens || []
+        if (positions.length) {
           setBalances({
-            native: data.tokens.find((t) => !t.contractAddress) || { symbol: 'ETH', balance: 0 },
-            tokens: data.tokens.filter((t) => t.contractAddress),
+            native: positions.find((t) => !t.contractAddress) || { symbol: 'ETH', balance: 0 },
+            tokens: positions.filter((t) => t.contractAddress),
             source: 'zerion',
           })
           setOpen(true)

@@ -4,24 +4,60 @@ import { resolveCoinGeckoId } from '../../shared/constants.js'
 
 const COINBASE_BASE = 'https://api.coinbase.com'
 
-function signRequest(timestamp, method, path, body, secret) {
+// ── Legacy API key auth (CB-ACCESS-KEY style) ──
+function signRequestLegacy(timestamp, method, path, body, secret) {
   const message = timestamp + method.toUpperCase() + path + (body || '')
   return crypto.createHmac('sha256', secret).update(message).digest('base64')
 }
 
-export async function fetchCoinbaseBalances(apiKey, apiSecret) {
-  const timestamp = Math.floor(Date.now() / 1000).toString()
-  const method = 'GET'
-  const path = '/v2/accounts?limit=100'
-  const signature = signRequest(timestamp, method, path, '', apiSecret)
+// ── CDP API key auth (organizations/... style, ES256 JWT) ──
+function buildCdpJwt(apiKeyName, privateKeyPem) {
+  const header = { alg: 'ES256', kid: apiKeyName, nonce: crypto.randomBytes(16).toString('hex'), typ: 'JWT' }
+  const now = Math.floor(Date.now() / 1000)
+  const uri = 'GET api.coinbase.com/v2/accounts'
+  const payload = { sub: apiKeyName, iss: 'cdp', aud: ['cdp_service'], nbf: now, exp: now + 120, uris: [uri] }
 
-  const { data } = await axios.get(`${COINBASE_BASE}${path}`, {
-    headers: {
+  const encode = (obj) => Buffer.from(JSON.stringify(obj)).toString('base64url')
+  const unsigned = encode(header) + '.' + encode(payload)
+
+  // Clean up the PEM — handle escaped newlines from form input
+  const cleanPem = privateKeyPem.replace(/\\n/g, '\n').trim()
+  const sign = crypto.createSign('SHA256')
+  sign.update(unsigned)
+  const sig = sign.sign(cleanPem, 'base64url')
+
+  return unsigned + '.' + sig
+}
+
+function isCdpKey(apiKey) {
+  return apiKey.startsWith('organizations/')
+}
+
+export async function fetchCoinbaseBalances(apiKey, apiSecret) {
+  const path = '/v2/accounts?limit=100'
+  let headers
+
+  if (isCdpKey(apiKey)) {
+    // New CDP key format
+    const jwt = buildCdpJwt(apiKey, apiSecret)
+    headers = {
+      Authorization: `Bearer ${jwt}`,
+      'CB-VERSION': '2024-01-01',
+    }
+  } else {
+    // Legacy API key format
+    const timestamp = Math.floor(Date.now() / 1000).toString()
+    const signature = signRequestLegacy(timestamp, 'GET', path, '', apiSecret)
+    headers = {
       'CB-ACCESS-KEY': apiKey,
       'CB-ACCESS-SIGN': signature,
       'CB-ACCESS-TIMESTAMP': timestamp,
       'CB-VERSION': '2024-01-01',
-    },
+    }
+  }
+
+  const { data } = await axios.get(`${COINBASE_BASE}${path}`, {
+    headers,
     timeout: 15000,
   })
 
