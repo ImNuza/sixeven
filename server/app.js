@@ -456,8 +456,16 @@ export function createApp({
       }))
       const apiKey = process.env.AI_PROVIDER_API_KEY || process.env.FEATHERLESS_API_KEY
       const baseURL = process.env.AI_PROVIDER_BASE_URL || process.env.FEATHERLESS_BASE_URL || 'https://api.featherless.ai/v1'
-      const model = process.env.AI_MODEL || process.env.FEATHERLESS_MODEL || 'perplexity-ai/r1-1776-distill-llama-70b'
+      const model = process.env.AI_MODEL || process.env.FEATHERLESS_MODEL || 'Qwen/Qwen3-70B-Instruct'
       const timeoutMs = Number(process.env.AI_TIMEOUT_MS || 30000)
+      const fallbackModels = String(
+        process.env.AI_MODEL_FALLBACKS
+        || process.env.FEATHERLESS_MODEL_FALLBACKS
+        || 'Qwen/Qwen2.5-72B-Instruct,perplexity-ai/r1-1776-distill-llama-70b'
+      )
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean)
 
       if (!apiKey || !baseURL || !model) {
         return res.status(503).json({
@@ -507,12 +515,27 @@ HARD RULES:
         systemMessages.push({ role: 'system', content: `User's current portfolio context (use this to personalise all advice):\n${portfolioContext}` })
       }
 
-      const completion = await openai.chat.completions.create({
-        model,
-        messages: [...systemMessages, ...safeMessages],
-        max_tokens: 700,
-        temperature: 0.4,
-      })
+      const modelCandidates = [model, ...fallbackModels.filter((candidate) => candidate !== model)]
+      let completion = null
+      let lastModelError = null
+
+      for (const candidateModel of modelCandidates) {
+        try {
+          completion = await openai.chat.completions.create({
+            model: candidateModel,
+            messages: [...systemMessages, ...safeMessages],
+            max_tokens: 700,
+            temperature: 0.4,
+          })
+          break
+        } catch (candidateError) {
+          lastModelError = candidateError
+        }
+      }
+
+      if (!completion) {
+        throw lastModelError || new Error('AI provider request failed for all configured models.')
+      }
 
       const reply = completion?.choices?.[0]?.message?.content
       if (!reply || !String(reply).trim()) {
