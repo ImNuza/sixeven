@@ -727,10 +727,12 @@ HARD RULES:
       const balances = await fetchCoinbaseBalances(apiKey, apiSecret)
       res.json({ balances, source: 'coinbase' })
     } catch (err) {
-      if (err.response?.status === 401) {
-        return res.status(401).json({ error: 'Invalid API key. Ensure read-only permissions are enabled.' })
+      const status = err.response?.status
+      if (status === 401 || status === 403) {
+        return res.status(400).json({ error: 'Invalid Coinbase API key. Ensure read-only permissions are enabled.' })
       }
-      res.status(500).json({ error: err.message })
+      console.error('[cex] Coinbase error:', err.response?.data || err.message)
+      res.status(500).json({ error: err.response?.data?.message || err.message })
     }
   })
 
