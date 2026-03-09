@@ -114,21 +114,18 @@ export function createAssetsController({ pool, recordNetWorthSnapshot }) {
       const client = await pool.connect()
       try {
         await client.query('BEGIN')
-        const updateResult = await client.query(
+        const { rows } = await client.query(
           `UPDATE assets
            SET name=$1, category=$2, ticker=$3, value=$4, cost=$5,
                quantity=$6, date=$7, institution=$8, details=$9
-           WHERE id=$10 AND user_id=$11`,
+           WHERE id=$10 AND user_id=$11
+           RETURNING *`,
           [safe.name, safe.category, safe.ticker, safe.value, safe.cost, safe.quantity, safe.date, safe.institution, safe.details, req.params.id, req.user.id]
         )
-        if (!updateResult.rowCount) {
+        if (!rows.length) {
           await client.query('ROLLBACK')
           return res.status(404).json({ error: 'Asset not found' })
         }
-        const { rows } = await client.query(
-          'SELECT * FROM assets WHERE id = $1 AND user_id = $2',
-          [req.params.id, req.user.id]
-        )
         await recordNetWorthSnapshot(req.user.id, 'asset_update', client)
         await client.query('COMMIT')
         res.json(decryptAsset(rows[0]))

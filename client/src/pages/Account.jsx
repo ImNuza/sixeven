@@ -7,6 +7,7 @@ import SingpassPanel from '../components/SingpassPanel'
 import BankPanel from '../components/BankPanel'
 import WalletPanel from '../components/WalletPanel'
 import CexPanel from '../components/CexPanel'
+import MoomooPanel from '../components/MoomooPanel'
 
 function initialsFor(username) {
   const letters = String(username || 'SS')
@@ -131,7 +132,7 @@ export default function Account() {
               <p className="text-sm font-semibold" style={{ color: 'var(--app-text)' }}>Connected Accounts</p>
               <p className="text-xs mt-0.5" style={{ color: 'var(--app-text-muted)' }}>
                 <Lock className="inline h-3 w-3 mr-1 opacity-60" />
-                Singpass · Bank · Crypto Wallet — private to your account
+                Singpass · Bank · Crypto · moomoo — private to your account
               </p>
             </div>
           </div>
@@ -154,6 +155,7 @@ export default function Account() {
             <BankPanel onImportDone={handleImportDone} />
             <WalletPanel onImportDone={handleImportDone} />
             <CexPanel onImportDone={handleImportDone} />
+            <MoomooPanel onImportDone={handleImportDone} />
           </div>
         )}
       </div>

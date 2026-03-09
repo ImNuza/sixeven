@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useRef, useState } from 'react'
+import { createContext, useContext, useEffect, useState } from 'react'
 import { clearStoredSession, loadStoredSession, saveStoredSession } from './storage.js'
 import {
   changePassword as changePasswordRequest,
@@ -19,8 +19,6 @@ export function AuthProvider({ children }) {
     return stored?.user ? stored : null
   })
   const [isReady, setIsReady] = useState(false)
-  // Prevents restoreSession from overwriting a session set by an explicit login/register call.
-  const explicitAuthRef = useRef(false)
 
   useEffect(() => {
     let cancelled = false
@@ -32,13 +30,10 @@ export function AuthProvider({ children }) {
         const response = await fetchCurrentUser()
         const nextSession = { user: response.user }
         saveStoredSession(nextSession)
-        if (!cancelled && !explicitAuthRef.current) setSession(nextSession)
+        if (!cancelled) setSession(nextSession)
       } catch {
-        // Don't clear session if the user just logged in / registered
-        if (!explicitAuthRef.current) {
-          clearStoredSession()
-          if (!cancelled) setSession(null)
-        }
+        clearStoredSession()
+        if (!cancelled) setSession(null)
       } finally {
         if (!cancelled) setIsReady(true)
       }
@@ -59,38 +54,23 @@ export function AuthProvider({ children }) {
   }, [])
 
   async function login(credentials) {
-    explicitAuthRef.current = true
-    try {
-      const nextSession = await loginUser(credentials)
-      const safe = { user: nextSession.user }
-      saveStoredSession(safe)
-      setSession(safe)
-      setIsReady(true)
-      return nextSession
-    } catch (error) {
-      explicitAuthRef.current = false
-      throw error
-    }
+    const nextSession = await loginUser(credentials)
+    const safe = { user: nextSession.user }
+    saveStoredSession(safe)
+    setSession(safe)
+    return nextSession
   }
 
   async function register(credentials) {
-    explicitAuthRef.current = true
-    try {
-      const nextSession = await registerUser(credentials)
-      const safe = { user: nextSession.user }
-      saveStoredSession(safe)
-      setSession(safe)
-      setIsReady(true)
-      return nextSession
-    } catch (error) {
-      explicitAuthRef.current = false
-      throw error
-    }
+    const nextSession = await registerUser(credentials)
+    const safe = { user: nextSession.user }
+    saveStoredSession(safe)
+    setSession(safe)
+    return nextSession
   }
 
   async function logout() {
     try { await logoutUser() } catch { /* best effort — server revokes token */ }
-    explicitAuthRef.current = false
     clearStoredSession()
     setSession(null)
   }
@@ -113,7 +93,6 @@ export function AuthProvider({ children }) {
 
   async function deleteAccount(payload) {
     const result = await deleteAccountRequest(payload)
-    explicitAuthRef.current = false
     clearStoredSession()
     setSession(null)
     return result

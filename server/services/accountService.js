@@ -1,5 +1,6 @@
 import { hashPassword, signAuthToken, verifyPassword } from './authService.js'
 import { encrypt, decrypt, hmacLookup } from './encryptionService.js'
+import { seedStarterPortfolio } from '../db/seedData.js'
 
 function sanitizeUser(user) {
   // email column stores AES-256-GCM ciphertext; decrypt transparently (plaintext passthrough for legacy rows)
@@ -95,7 +96,7 @@ export async function createUserAccount(pool, { username, password, email }) {
       [trimmedUsername, encryptedEmail, emailHmac, passwordHash]
     )
 
-    // await seedStarterPortfolio(client, rows[0].id)
+    await seedStarterPortfolio(client, rows[0].id)
     await client.query('COMMIT')
 
     const user = sanitizeUser(rows[0])
@@ -210,20 +211,15 @@ export async function updateProfile(pool, userId, { email }) {
 
   const encryptedEmail = normalizedEmail ? encrypt(normalizedEmail) : null
   const emailHmac = normalizedEmail ? hmacLookup(normalizedEmail) : null
-  const result = await pool.query(
+  const { rows } = await pool.query(
     `UPDATE users
      SET email = $1, email_hmac = $2
-     WHERE id = $3`,
+     WHERE id = $3
+     RETURNING id, username, email, created_at`,
     [encryptedEmail, emailHmac, userId]
   )
 
-  if (!result.rowCount) {
-    const error = new Error('User account no longer exists.')
-    error.statusCode = 404
-    throw error
-  }
-
   return {
-    user: await getUserById(pool, userId),
+    user: sanitizeUser(rows[0]),
   }
 }

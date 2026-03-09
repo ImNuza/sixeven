@@ -104,11 +104,6 @@ async function refreshUserPricesInternal(userId, snapshotSource = 'price_refresh
           const priceSgd = coinData.sgd || coinData.usd * usdSgd
           const priceUsd = coinData.usd
           await upsertPrice(client, geckoId, priceUsd, priceSgd)
-          // Also cache under the original ticker so JOINs on a.ticker = pc.symbol work
-          // regardless of whether the asset stores "BTC" or "bitcoin"
-          if (asset.ticker !== geckoId) {
-            await upsertPrice(client, asset.ticker, priceUsd, priceSgd)
-          }
           await updateAssetValue(client, asset.id, priceSgd, parseFloat(asset.quantity))
         }
       } catch {
@@ -116,7 +111,7 @@ async function refreshUserPricesInternal(userId, snapshotSource = 'price_refresh
       }
     }
 
-    for (const asset of stockAssets) {
+    await Promise.all(stockAssets.map(async (asset) => {
       try {
         let priceNative = null
 
@@ -137,7 +132,7 @@ async function refreshUserPricesInternal(userId, snapshotSource = 'price_refresh
         }
 
         if (!priceNative) {
-          continue
+          return
         }
 
         const isSgxStock = asset.ticker.endsWith('.SI')
@@ -149,7 +144,7 @@ async function refreshUserPricesInternal(userId, snapshotSource = 'price_refresh
       } catch {
         // Skip symbols that fail during a refresh cycle.
       }
-    }
+    }))
 
     await recordNetWorthSnapshot(userId, snapshotSource, client)
     await client.query('COMMIT')
