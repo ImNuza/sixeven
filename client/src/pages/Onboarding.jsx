@@ -586,7 +586,7 @@ export default function Onboarding() {
     setSaving(true)
     setError('')
     try {
-      saveOnboardingProfile(onboardingProfile)
+      saveOnboardingProfile(onboardingProfile, user?.id)
       if (values.email.trim()) {
         await updateProfile({ email: values.email.trim() })
       }

@@ -18,11 +18,12 @@ import {
 import { CSS } from '@dnd-kit/utilities'
 import { ASSET_CATEGORIES, CATEGORY_COLORS } from '../../../shared/constants.js'
 import { calculateWellnessScore, getWellnessStatus } from '../data/wellnessCalculator.js'
-import { fetchAssets, fetchPortfolioHistory, fetchPortfolioSummary, fetchPrices, refreshPrices } from '../services/api.js'
+import { fetchDashboardData, refreshPrices } from '../services/api.js'
 import { buildPortfolioInsights } from '../data/portfolioInsights.js'
 import ExportMenu from '../components/ExportMenu'
 import { exportDashboardPDF, exportDashboardExcel } from '../utils/exportReport'
 import { useNotify } from '../context/NotificationContext'
+import { useAuth } from '../auth/AuthContext.jsx'
 import { loadOnboardingProfile } from '../onboarding/storage.js'
 
 const TIME_RANGES = [
@@ -187,7 +188,8 @@ function CustomizePanel({ widgets, onClose, onChange }) {
 // ── Main Dashboard ────────────────────────────────────────────
 export default function Dashboard() {
   const notify = useNotify()
-  const [onboardingProfile, setOnboardingProfile] = useState(() => loadOnboardingProfile())
+  const { user } = useAuth()
+  const [onboardingProfile, setOnboardingProfile] = useState(() => loadOnboardingProfile(user?.id))
   const [assets, setAssets] = useState([])
   const [summary, setSummary] = useState(null)
   const [history, setHistory] = useState([])
@@ -206,9 +208,12 @@ export default function Dashboard() {
       try {
         if (showSpinner) setLoading(true)
         setError('')
-        const [a, s, h, p] = await Promise.all([fetchAssets(), fetchPortfolioSummary(), fetchPortfolioHistory(), fetchPrices()])
+        const data = await fetchDashboardData()
         if (cancelled) return
-        setAssets(a); setSummary(s); setHistory(h); setPrices(p)
+        setAssets(data.assets)
+        setSummary(data.summary)
+        setHistory(data.history)
+        setPrices(data.prices)
       } catch (err) {
         if (!cancelled) setError(err.message || 'Failed to load dashboard data.')
       } finally {
@@ -216,18 +221,22 @@ export default function Dashboard() {
       }
     }
     load()
-    const id = window.setInterval(() => load(false), 30000)
+    const id = window.setInterval(() => load(false), 45000)
     return () => { cancelled = true; window.clearInterval(id) }
   }, [])
 
   useEffect(() => {
+    setOnboardingProfile(loadOnboardingProfile(user?.id))
+  }, [user?.id])
+
+  useEffect(() => {
     function syncOnboardingProfile() {
-      setOnboardingProfile(loadOnboardingProfile())
+      setOnboardingProfile(loadOnboardingProfile(user?.id))
     }
 
     window.addEventListener('safeseven:onboarding', syncOnboardingProfile)
     return () => window.removeEventListener('safeseven:onboarding', syncOnboardingProfile)
-  }, [])
+  }, [user?.id])
 
   const { score, breakdown } = useMemo(
     () => calculateWellnessScore(assets, { monthlyChangePct: summary?.monthlyChangePct ?? null }),
@@ -290,8 +299,11 @@ export default function Dashboard() {
       setIsRefreshing(true)
       setError('')
       await refreshPrices()
-      const [a, s, h, p] = await Promise.all([fetchAssets(), fetchPortfolioSummary(), fetchPortfolioHistory(), fetchPrices()])
-      setAssets(a); setSummary(s); setHistory(h); setPrices(p)
+      const data = await fetchDashboardData()
+      setAssets(data.assets)
+      setSummary(data.summary)
+      setHistory(data.history)
+      setPrices(data.prices)
       notify({ type: 'success', title: 'Prices refreshed', message: 'Dashboard data updated.' })
     } catch (err) {
       setError(err.message || 'Failed to refresh prices.')

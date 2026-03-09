@@ -11,6 +11,7 @@ import { createAssetsController } from './controllers/assetsController.js'
 import { createAuthController } from './controllers/authController.js'
 import { createAuthMiddleware } from './middleware/auth.js'
 import { getInsightsPayload } from './services/insightsService.js'
+import { decrypt, decryptJSON } from './services/encryptionService.js'
 
 // ── Plaid client ──────────────────────────────────────────────
 function makePlaidClient() {
@@ -155,6 +156,48 @@ export function createApp({
   app.put('/api/auth/profile', requireAuth, authController.updateProfile)
   app.put('/api/auth/password', requireAuth, authController.updatePassword)
   app.delete('/api/auth/account', requireAuth, authController.removeAccount)
+
+  app.get('/api/dashboard', requireAuth, async (req, res) => {
+    try {
+      // Run freshness check once for the whole dashboard payload instead of once per widget endpoint.
+      ensureFreshPrices(req.user.id).catch(() => {})
+
+      const [assetResult, summary, history, pricesResult] = await Promise.all([
+        pool.query(
+          `SELECT *
+           FROM assets
+           WHERE user_id = $1
+           ORDER BY value DESC, name ASC`,
+          [req.user.id]
+        ),
+        getPortfolioSummary(req.user.id),
+        getPortfolioHistory(req.user.id),
+        pool.query(
+          `SELECT DISTINCT pc.*
+           FROM price_cache pc
+           INNER JOIN assets a ON a.ticker = pc.symbol
+           WHERE a.user_id = $1
+           ORDER BY pc.updated_at DESC`,
+          [req.user.id]
+        ),
+      ])
+
+      const assets = assetResult.rows.map((row) => ({
+        ...row,
+        institution: decrypt(row.institution),
+        details: decryptJSON(row.details),
+      }))
+
+      res.json({
+        assets,
+        summary,
+        history,
+        prices: pricesResult.rows,
+      })
+    } catch (err) {
+      res.status(500).json({ error: err.message })
+    }
+  })
 
   app.get('/api/assets', requireAuth, (req, res) => {
     // Fire-and-forget: refresh prices in background so the response
@@ -391,7 +434,7 @@ HARD RULES:
     if (plaidClient) {
       try { await plaidClient.itemRemove({ access_token: rows[0].access_token }) } catch { /* best effort */ }
     }
-    await pool.query('DELETE FROM plaid_items WHERE id = $1', [req.params.id])
+    await pool.query('DELETE FROM plaid_items WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id])
     res.status(204).end()
   })
 
