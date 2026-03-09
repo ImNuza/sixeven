@@ -69,6 +69,23 @@ const DEMO_IMPORT_TAG = Object.freeze({
 
 const SUPPORTED_DEMO_PROVIDERS = new Set(Object.values(DEMO_PROVIDER))
 const USD_SGD = 1.35
+let aiRequestQueue = Promise.resolve()
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function isConcurrencyLimitError(error) {
+  const status = Number(error?.status || error?.response?.status || 0)
+  const message = String(error?.response?.data?.error?.message || error?.message || '').toLowerCase()
+  return status === 429 && message.includes('concurrency')
+}
+
+function enqueueAiRequest(task) {
+  const next = aiRequestQueue.then(task, task)
+  aiRequestQueue = next.catch(() => {})
+  return next
+}
 
 function parseStoredJson(raw, fallback = {}) {
   if (raw == null) return fallback
@@ -458,10 +475,12 @@ export function createApp({
       const baseURL = process.env.AI_PROVIDER_BASE_URL || process.env.FEATHERLESS_BASE_URL || 'https://api.featherless.ai/v1'
       const model = process.env.AI_MODEL || process.env.FEATHERLESS_MODEL || 'Qwen/Qwen3-70B-Instruct'
       const timeoutMs = Number(process.env.AI_TIMEOUT_MS || 30000)
+      const maxRetries = Math.max(0, Number(process.env.AI_CONCURRENCY_RETRIES || 3))
+      const retryBaseMs = Math.max(300, Number(process.env.AI_CONCURRENCY_RETRY_BASE_MS || 1500))
       const fallbackModels = String(
         process.env.AI_MODEL_FALLBACKS
         || process.env.FEATHERLESS_MODEL_FALLBACKS
-        || 'Qwen/Qwen2.5-72B-Instruct,perplexity-ai/r1-1776-distill-llama-70b'
+        || 'Qwen/Qwen2.5-32B-Instruct,Qwen/Qwen2.5-14B-Instruct,perplexity-ai/r1-1776-distill-llama-70b'
       )
         .split(',')
         .map((value) => value.trim())
@@ -520,16 +539,26 @@ HARD RULES:
       let lastModelError = null
 
       for (const candidateModel of modelCandidates) {
-        try {
-          completion = await openai.chat.completions.create({
-            model: candidateModel,
-            messages: [...systemMessages, ...safeMessages],
-            max_tokens: 700,
-            temperature: 0.4,
-          })
+        for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+          try {
+            completion = await enqueueAiRequest(() => openai.chat.completions.create({
+              model: candidateModel,
+              messages: [...systemMessages, ...safeMessages],
+              max_tokens: 700,
+              temperature: 0.4,
+            }))
+            break
+          } catch (candidateError) {
+            lastModelError = candidateError
+            if (!isConcurrencyLimitError(candidateError) || attempt >= maxRetries) {
+              break
+            }
+            const backoff = retryBaseMs * (attempt + 1)
+            await sleep(backoff)
+          }
+        }
+        if (completion) {
           break
-        } catch (candidateError) {
-          lastModelError = candidateError
         }
       }
 
