@@ -5,16 +5,15 @@
  * Automatically falls back to SQLite when DATABASE_URL is not set.
  */
 
-import Database from 'better-sqlite3'
 import pg from 'pg'
 import path from 'path'
 import fs from 'fs'
 import { fileURLToPath } from 'url'
-import dotenv from 'dotenv'
-
-dotenv.config()
+import { createRequire } from 'module'
+import '../env.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const require = createRequire(import.meta.url)
 
 // Force SQLite with USE_SQLITE=true, otherwise use PostgreSQL if DATABASE_URL is set
 const forceSqlite = process.env.USE_SQLITE === 'true'
@@ -189,7 +188,7 @@ class SQLiteClient {
 }
 
 class SQLitePool {
-  constructor(dbPath) {
+  constructor(dbPath, Database) {
     this.dbPath = dbPath
     this.db = new Database(dbPath)
     this.db.pragma('journal_mode = WAL')
@@ -218,6 +217,7 @@ class PostgresPool {
     this.pool = new pg.Pool({
       connectionString,
       ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: true } : false,
+      connectionTimeoutMillis: Number(process.env.DB_CONNECTION_TIMEOUT_MS || 5000),
     })
     console.log('[db] Using PostgreSQL database')
   }
@@ -241,14 +241,25 @@ export function createPool() {
   if (DB_TYPE === 'postgres') {
     return new PostgresPool(process.env.DATABASE_URL)
   } else {
+    let Database
+    try {
+      const sqlite = requireBetterSqlite()
+      Database = sqlite.default || sqlite
+    } catch (error) {
+      throw new Error(`[db] SQLite fallback requires better-sqlite3 to be installed: ${error.message}`)
+    }
     const dbPath = process.env.SQLITE_PATH || path.join(__dirname, '..', 'data', 'safeseven.db')
     // Ensure data directory exists
     const dataDir = path.dirname(dbPath)
     if (!fs.existsSync(dataDir)) {
       fs.mkdirSync(dataDir, { recursive: true })
     }
-    return new SQLitePool(dbPath)
+    return new SQLitePool(dbPath, Database)
   }
 }
 
 export { convertSqlForSqlite, convertPlaceholders }
+
+function requireBetterSqlite() {
+  return require('better-sqlite3')
+}

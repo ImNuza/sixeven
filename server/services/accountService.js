@@ -211,15 +211,20 @@ export async function updateProfile(pool, userId, { email }) {
 
   const encryptedEmail = normalizedEmail ? encrypt(normalizedEmail) : null
   const emailHmac = normalizedEmail ? hmacLookup(normalizedEmail) : null
-  const { rows } = await pool.query(
+  const result = await pool.query(
     `UPDATE users
      SET email = $1, email_hmac = $2
-     WHERE id = $3
-     RETURNING id, username, email, created_at`,
+     WHERE id = $3`,
     [encryptedEmail, emailHmac, userId]
   )
 
+  if (!result.rowCount) {
+    const error = new Error('User account no longer exists.')
+    error.statusCode = 404
+    throw error
+  }
+
   return {
-    user: sanitizeUser(rows[0]),
+    user: await getUserById(pool, userId),
   }
 }

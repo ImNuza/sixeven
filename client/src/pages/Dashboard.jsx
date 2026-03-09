@@ -6,6 +6,7 @@ import {
 import {
   AlertTriangle, CheckCircle, Info, RefreshCw, ShieldCheck, Clock,
   ArrowUpRight, ArrowDownRight, Settings2, GripVertical, EyeOff, Eye, X,
+  UserRound, Globe2, Briefcase, Target, Wallet, Landmark, Building2, Link2,
 } from 'lucide-react'
 import {
   DndContext, closestCenter, PointerSensor, useSensor, useSensors,
@@ -21,6 +22,7 @@ import { buildPortfolioInsights } from '../data/portfolioInsights.js'
 import ExportMenu from '../components/ExportMenu'
 import { exportDashboardPDF, exportDashboardExcel } from '../utils/exportReport'
 import { useNotify } from '../context/NotificationContext'
+import { loadOnboardingProfile } from '../onboarding/storage.js'
 
 const TIME_RANGES = [
   { label: '1M', months: 1 }, { label: '3M', months: 3 },
@@ -184,6 +186,7 @@ function CustomizePanel({ widgets, onClose, onChange }) {
 // ── Main Dashboard ────────────────────────────────────────────
 export default function Dashboard() {
   const notify = useNotify()
+  const [onboardingProfile, setOnboardingProfile] = useState(() => loadOnboardingProfile())
   const [assets, setAssets] = useState([])
   const [summary, setSummary] = useState(null)
   const [history, setHistory] = useState([])
@@ -211,8 +214,17 @@ export default function Dashboard() {
       }
     }
     load()
-    const id = window.setInterval(() => load(false), 60000)
+    const id = window.setInterval(() => load(false), 30000)
     return () => { cancelled = true; window.clearInterval(id) }
+  }, [])
+
+  useEffect(() => {
+    function syncOnboardingProfile() {
+      setOnboardingProfile(loadOnboardingProfile())
+    }
+
+    window.addEventListener('safeseven:onboarding', syncOnboardingProfile)
+    return () => window.removeEventListener('safeseven:onboarding', syncOnboardingProfile)
   }, [])
 
   const { score, breakdown } = useMemo(
@@ -246,6 +258,30 @@ export default function Dashboard() {
   const lastSync = prices[0]?.updated_at
     ? new Date(prices[0].updated_at).toLocaleString('en-SG', { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' })
     : null
+  const onboardingGoals = onboardingProfile?.financialGoals || []
+  const onboardingWallets = onboardingProfile?.walletAddresses || []
+  const onboardingHighlights = [
+    { label: 'Country / Region', value: onboardingProfile?.country, icon: Globe2 },
+    { label: 'Employment', value: onboardingProfile?.employmentStatus, icon: Briefcase },
+    { label: 'Risk Appetite', value: onboardingProfile?.riskAppetite, icon: ShieldCheck },
+    { label: 'Income Range', value: onboardingProfile?.incomeRange, icon: Landmark },
+    { label: 'Monthly Expenses', value: onboardingProfile?.monthlyExpensesRange, icon: Wallet },
+    { label: 'Other Debts', value: onboardingProfile?.otherDebts ? formatCurrency(onboardingProfile.otherDebts) : null, icon: AlertTriangle },
+  ].filter((item) => item.value)
+  const onboardingAssetSummary = [
+    { label: 'Liquid Assets', value: onboardingProfile?.liquidAssets ? formatCurrency(onboardingProfile.liquidAssets) : null },
+    { label: 'Manual Bank', value: onboardingProfile?.manualBankBalance ? formatCurrency(onboardingProfile.manualBankBalance) : null },
+    { label: 'CPF', value: onboardingProfile?.cpfBalance ? formatCurrency(onboardingProfile.cpfBalance) : null },
+    { label: 'Stocks', value: onboardingProfile?.stocksValue ? formatCurrency(onboardingProfile.stocksValue) : null },
+    { label: 'Bonds', value: onboardingProfile?.bondsValue ? formatCurrency(onboardingProfile.bondsValue) : null },
+    { label: 'Crypto', value: onboardingProfile?.cryptoValue ? formatCurrency(onboardingProfile.cryptoValue) : null },
+    { label: 'Property', value: onboardingProfile?.propertyValue ? formatCurrency(onboardingProfile.propertyValue) : null },
+  ].filter((item) => item.value)
+  const integrationBadges = [
+    onboardingProfile?.ocbcLinked ? 'OCBC linked' : onboardingProfile?.bankLinkMode ? onboardingProfile.bankLinkMode : null,
+    onboardingProfile?.singpassLinked ? 'Singpass linked' : null,
+    onboardingProfile?.moomooImported ? `moomoo imported${onboardingProfile.moomooAccountId ? ` (${onboardingProfile.moomooAccountId})` : ''}` : null,
+  ].filter(Boolean)
 
   async function handleManualRefresh() {
     try {
@@ -326,6 +362,12 @@ export default function Dashboard() {
       <div className="flex items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold" style={{ color: 'var(--app-text)' }}>Wealth Dashboard</h1>
+          {onboardingProfile?.fullName && (
+            <p className="mt-1 text-sm" style={{ color: 'var(--app-text-muted)' }}>
+              {onboardingProfile.fullName}
+              {onboardingProfile.country ? ` · ${onboardingProfile.country}` : ''}
+            </p>
+          )}
           <div className="flex items-center gap-2 mt-1">
             <Clock className="h-3.5 w-3.5" style={{ color: 'var(--app-text-muted)' }} />
             <p className="text-xs" style={{ color: 'var(--app-text-muted)' }}>
@@ -355,6 +397,110 @@ export default function Dashboard() {
           </button>
         </div>
       </div>
+
+      {onboardingProfile && (
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
+          <div className="glass-card p-6 xl:col-span-2">
+            <div className="flex items-start justify-between gap-4 mb-5">
+              <SectionHeader title="Wealth Wellness Profile" sub="Saved from onboarding and reflected here for planning." />
+              <div className="inline-flex items-center gap-2 rounded-xl px-3 py-2" style={{ background: 'rgba(255,255,255,0.04)' }}>
+                <UserRound className="h-4 w-4" style={{ color: 'var(--app-accent)' }} />
+                <span className="text-xs font-semibold" style={{ color: 'var(--app-text-soft)' }}>
+                  {onboardingProfile.fullName || onboardingProfile.username || 'Profile'}
+                </span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {onboardingHighlights.map(({ label, value, icon: Icon }) => (
+                <div key={label} className="rounded-2xl border px-4 py-3" style={{ borderColor: 'var(--app-border)', background: 'rgba(255,255,255,0.03)' }}>
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <Icon className="h-3.5 w-3.5" style={{ color: 'var(--app-accent)' }} />
+                    <span className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--app-text-muted)' }}>{label}</span>
+                  </div>
+                  <p className="text-sm font-medium" style={{ color: 'var(--app-text)' }}>{value}</p>
+                </div>
+              ))}
+            </div>
+
+            {onboardingGoals.length > 0 && (
+              <div className="mt-5">
+                <p className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--app-text-muted)' }}>Primary Goals</p>
+                <div className="flex flex-wrap gap-2">
+                  {onboardingGoals.map((goal) => (
+                    <span key={goal} className="rounded-full px-3 py-1.5 text-xs font-medium" style={{ background: 'rgba(47,124,246,0.14)', color: '#8ec5ff' }}>
+                      {goal}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {integrationBadges.length > 0 && (
+              <div className="mt-5">
+                <p className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--app-text-muted)' }}>Connected Sources</p>
+                <div className="flex flex-wrap gap-2">
+                  {integrationBadges.map((item) => (
+                    <span key={item} className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium" style={{ background: 'rgba(24,168,113,0.12)', color: '#74dfb5' }}>
+                      <Link2 className="h-3 w-3" />
+                      {item}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="glass-card p-6">
+            <SectionHeader title="Manual Inputs" sub="Values captured during onboarding." />
+            <div className="mt-5 space-y-3">
+              {onboardingAssetSummary.map((item) => (
+                <div key={item.label} className="flex items-center justify-between rounded-xl px-3 py-2.5" style={{ background: 'rgba(255,255,255,0.03)' }}>
+                  <span className="text-sm" style={{ color: 'var(--app-text-soft)' }}>{item.label}</span>
+                  <span className="text-sm font-semibold" style={{ color: 'var(--app-text)' }}>{item.value}</span>
+                </div>
+              ))}
+              {!onboardingAssetSummary.length && (
+                <p className="text-sm" style={{ color: 'var(--app-text-muted)' }}>No manual values saved yet.</p>
+              )}
+            </div>
+
+            {(onboardingProfile?.propertyLookup?.address || onboardingProfile?.propertyPostcode || onboardingWallets.length > 0) && (
+              <div className="mt-5 pt-5 border-t" style={{ borderColor: 'var(--app-border)' }}>
+                {onboardingProfile?.propertyLookup?.address && (
+                  <div className="mb-4">
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <Building2 className="h-4 w-4" style={{ color: 'var(--app-accent)' }} />
+                      <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--app-text-muted)' }}>Property</span>
+                    </div>
+                    <p className="text-sm font-medium" style={{ color: 'var(--app-text)' }}>{onboardingProfile.propertyLookup.address}</p>
+                    <p className="text-xs mt-1" style={{ color: 'var(--app-text-muted)' }}>
+                      {onboardingProfile.propertyPostcode ? `Postcode ${onboardingProfile.propertyPostcode}` : ''}
+                      {onboardingProfile.propertyLookup?.hdb?.latestResalePrice ? ` · Latest HDB resale ${formatCurrency(onboardingProfile.propertyLookup.hdb.latestResalePrice)}` : ''}
+                    </p>
+                  </div>
+                )}
+
+                {onboardingWallets.length > 0 && (
+                  <div>
+                    <div className="flex items-center gap-2 mb-2">
+                      <Wallet className="h-4 w-4" style={{ color: 'var(--app-accent)' }} />
+                      <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--app-text-muted)' }}>Wallets</span>
+                    </div>
+                    <div className="space-y-2">
+                      {onboardingWallets.slice(0, 3).map((walletAddress) => (
+                        <div key={walletAddress} className="rounded-xl px-3 py-2 text-xs font-mono" style={{ background: 'rgba(255,255,255,0.03)', color: 'var(--app-text-soft)' }}>
+                          {walletAddress}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* ── Widgets (in user-defined order) ─────────────────── */}
       {visible.map((widget, idx) => {

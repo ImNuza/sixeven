@@ -4,6 +4,7 @@ import { ArrowLeft, Link2 } from 'lucide-react'
 import SingpassPanel from '../components/SingpassPanel'
 import BankPanel from '../components/BankPanel'
 import WalletPanel from '../components/WalletPanel'
+import SnapTradePanel from '../components/SnapTradePanel'
 
 export default function Connect() {
   const navigate = useNavigate()
@@ -50,6 +51,7 @@ export default function Connect() {
 
       <SingpassPanel onImportDone={handleImportDone} />
       <BankPanel onImportDone={handleImportDone} />
+      <SnapTradePanel onImportDone={handleImportDone} />
       <WalletPanel onImportDone={handleImportDone} />
     </div>
   )

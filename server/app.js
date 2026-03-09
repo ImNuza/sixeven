@@ -403,7 +403,9 @@ HARD RULES:
   async function getOcbcToken() {
     const clientId     = process.env.OCBC_CLIENT_ID
     const clientSecret = process.env.OCBC_CLIENT_SECRET
-    if (!clientId || !clientSecret) throw new Error('OCBC_CLIENT_ID / OCBC_CLIENT_SECRET not set in .env')
+    if (!clientId || !clientSecret || clientId.includes('your_') || clientSecret.includes('your_')) {
+      throw new Error('OCBC credentials are not configured for this environment. Use manual bank input or connect later.')
+    }
 
     const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString('base64')
     const tokenRes = await axios.post(
@@ -619,6 +621,97 @@ HARD RULES:
     res.status(204).end()
   })
 
+  app.get('/api/property/lookup', requireAuth, async (req, res) => {
+    const postcode = String(req.query.postcode || '').trim()
+    if (!/^\d{6}$/.test(postcode)) {
+      return res.status(400).json({ error: 'Enter a valid 6-digit Singapore postcode.' })
+    }
+
+    try {
+      const oneMapRes = await axios.get('https://www.onemap.gov.sg/api/common/elastic/search', {
+        params: {
+          searchVal: postcode,
+          returnGeom: 'N',
+          getAddrDetails: 'Y',
+          pageNum: 1,
+        },
+        timeout: 12000,
+      })
+
+      const result = oneMapRes.data?.results?.[0]
+      if (!result) {
+        return res.status(404).json({ error: 'No property was found for that postcode.' })
+      }
+
+      const block = String(result.BLK_NO || '').trim()
+      const street = String(result.ROAD_NAME || '').trim().toUpperCase()
+      let hdb = null
+
+      try {
+        const hdbRes = await axios.get('https://data.gov.sg/api/action/package_show', {
+          params: { id: 'resale-flat-prices' },
+          timeout: 12000,
+        })
+        const csvResource = (hdbRes.data?.result?.resources || []).find(
+          (resource) => /resale flat prices/i.test(resource.name || '') && resource.url
+        )
+
+        if (csvResource?.url && block && street) {
+          const csvRes = await axios.get(csvResource.url, { timeout: 20000 })
+          const lines = String(csvRes.data || '').split(/\r?\n/).filter(Boolean)
+          const header = lines[0]?.split(',').map((cell) => cell.replace(/^"|"$/g, '').trim().toLowerCase()) || []
+          const blockIdx = header.indexOf('block')
+          const streetIdx = header.indexOf('street_name')
+          const monthIdx = header.indexOf('month')
+          const typeIdx = header.indexOf('flat_type')
+          const modelIdx = header.indexOf('flat_model')
+          const areaIdx = header.indexOf('floor_area_sqm')
+          const priceIdx = header.indexOf('resale_price')
+
+          const matches = lines.slice(1)
+            .map((line) => line.match(/(".*?"|[^",]+)(?=,|$)/g)?.map((cell) => cell.replace(/^"|"$/g, '').trim()) || [])
+            .filter((cells) =>
+              String(cells[blockIdx] || '').trim() === block &&
+              String(cells[streetIdx] || '').trim().toUpperCase() === street
+            )
+            .slice(-5)
+
+          if (matches.length) {
+            const latest = matches[matches.length - 1]
+            hdb = {
+              latestMonth: latest[monthIdx] || null,
+              latestResalePrice: Number(latest[priceIdx] || 0) || null,
+              flatType: latest[typeIdx] || null,
+              flatModel: latest[modelIdx] || null,
+              floorAreaSqm: Number(latest[areaIdx] || 0) || null,
+              comparableSales: matches.map((cells) => ({
+                month: cells[monthIdx] || null,
+                resalePrice: Number(cells[priceIdx] || 0) || null,
+                flatType: cells[typeIdx] || null,
+              })).filter((sale) => sale.resalePrice),
+            }
+          }
+        }
+      } catch {
+        hdb = null
+      }
+
+      res.json({
+        postcode,
+        address: [result.BLK_NO, result.ROAD_NAME, result.BUILDING].filter(Boolean).join(' '),
+        block: result.BLK_NO || null,
+        street: result.ROAD_NAME || null,
+        building: result.BUILDING || null,
+        latitude: result.LATITUDE || null,
+        longitude: result.LONGITUDE || null,
+        town: result.PLANNING_AREA || null,
+        hdb,
+      })
+    } catch (err) {
+      res.status(502).json({ error: err.message || 'Property lookup failed.' })
+    }
+  })
+
   // ── Wallet connections ────────────────────────────────────────
   app.get('/api/wallet/connections', requireAuth, async (req, res) => {
     try {
@@ -795,6 +888,192 @@ HARD RULES:
   app.get('/api/ibkr/demo/positions', requireAuth, async (_req, res) => {
     const { getDemoPositions } = await import('./services/ibkrService.js')
     res.json({ ...getDemoPositions(), source: 'demo' })
+  })
+
+  // ── Live price lookup (single symbol, no DB write) ───────────
+  // Used by the Add Asset modal for real-time price fetching.
+  app.get('/api/prices/lookup', requireAuth, async (req, res) => {
+    const { symbol, type = 'stock' } = req.query
+    if (!symbol) return res.status(400).json({ error: 'symbol required' })
+    try {
+      if (type === 'crypto') {
+        const { SYMBOL_TO_COINGECKO_ID } = await import('../shared/constants.js')
+        const upper = symbol.toUpperCase()
+        const geckoId = SYMBOL_TO_COINGECKO_ID[upper] || symbol.toLowerCase()
+        const { data } = await axios.get(
+          `https://api.coingecko.com/api/v3/simple/price?ids=${geckoId}&vs_currencies=usd,sgd`,
+          { timeout: 8000 }
+        )
+        const coinData = data[geckoId]
+        if (!coinData) return res.status(404).json({ error: 'Token not found on CoinGecko' })
+        return res.json({ symbol: upper, geckoId, priceUsd: coinData.usd, priceSgd: coinData.sgd, type: 'crypto' })
+      }
+
+      const upper = symbol.toUpperCase()
+      const { data } = await axios.get(
+        `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(upper)}?interval=1d&range=1d`,
+        { timeout: 8000, headers: { 'User-Agent': 'Mozilla/5.0' } }
+      )
+      const result = data?.chart?.result?.[0]
+      if (!result) return res.status(404).json({ error: 'Symbol not found' })
+
+      const price = result.meta?.regularMarketPrice
+      const currency = result.meta?.currency || 'USD'
+      const name = result.meta?.longName || result.meta?.shortName || upper
+
+      const fxResp = await axios.get(
+        'https://query1.finance.yahoo.com/v8/finance/chart/USDSGD=X?interval=1d&range=1d',
+        { timeout: 5000, headers: { 'User-Agent': 'Mozilla/5.0' } }
+      ).catch(() => null)
+      const usdSgd = fxResp?.data?.chart?.result?.[0]?.meta?.regularMarketPrice || 1.35
+
+      const isSgx = upper.endsWith('.SI')
+      const priceSgd = isSgx ? price : price * usdSgd
+      const priceUsd = isSgx ? price / usdSgd : price
+
+      res.json({ symbol: upper, name, price, currency, priceUsd, priceSgd, usdSgd, type: 'stock' })
+    } catch (err) {
+      res.status(500).json({ error: err.message || 'Price lookup failed' })
+    }
+  })
+
+  // ── SnapTrade brokerage portfolio aggregation ─────────────────
+  // Register or retrieve the SnapTrade user record for the authenticated user.
+  // Creates the record on SnapTrade's side and persists the userSecret locally.
+  app.post('/api/snaptrade/register', requireAuth, async (req, res) => {
+    try {
+      const { isSnapTradeConfigured, registerUser } = await import('./services/snaptradeService.js')
+      if (!isSnapTradeConfigured()) {
+        return res.status(503).json({ error: 'SnapTrade not configured' })
+      }
+
+      // Check for an existing record
+      const { rows: existing } = await pool.query(
+        'SELECT snaptrade_user_id, user_secret FROM snaptrade_users WHERE user_id = $1',
+        [req.user.id]
+      )
+      if (existing.length) {
+        return res.json({ snapUserId: existing[0].snaptrade_user_id, registered: false })
+      }
+
+      const snapUserId = `user_${req.user.id}`
+      const result = await registerUser(snapUserId)
+      const userSecret = result.userSecret || result.user_secret || result
+
+      await pool.query(
+        `INSERT INTO snaptrade_users (user_id, snaptrade_user_id, user_secret)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (user_id) DO NOTHING`,
+        [req.user.id, snapUserId, typeof userSecret === 'string' ? userSecret : JSON.stringify(userSecret)]
+      )
+
+      res.json({ snapUserId, registered: true })
+    } catch (err) {
+      res.status(500).json({ error: err.message })
+    }
+  })
+
+  // Get a SnapTrade redirect URI so the user can connect their brokerage account.
+  app.post('/api/snaptrade/login', requireAuth, async (req, res) => {
+    try {
+      const { isSnapTradeConfigured, getLoginUrl } = await import('./services/snaptradeService.js')
+      if (!isSnapTradeConfigured()) {
+        return res.status(503).json({ error: 'SnapTrade not configured' })
+      }
+
+      const { rows } = await pool.query(
+        'SELECT snaptrade_user_id, user_secret FROM snaptrade_users WHERE user_id = $1',
+        [req.user.id]
+      )
+      if (!rows.length) {
+        return res.status(404).json({ error: 'SnapTrade user not registered. Call /api/snaptrade/register first.' })
+      }
+
+      const { snaptrade_user_id: snapUserId, user_secret: userSecret } = rows[0]
+      const result = await getLoginUrl(snapUserId, userSecret)
+      res.json({ redirectURI: result.redirectURI || result.redirect_uri || result })
+    } catch (err) {
+      res.status(500).json({ error: err.message })
+    }
+  })
+
+  // Fetch all holdings across connected brokerage accounts.
+  app.get('/api/snaptrade/holdings', requireAuth, async (req, res) => {
+    try {
+      const { isSnapTradeConfigured, getHoldings } = await import('./services/snaptradeService.js')
+      if (!isSnapTradeConfigured()) {
+        return res.status(503).json({ error: 'SnapTrade not configured' })
+      }
+
+      const { rows } = await pool.query(
+        'SELECT snaptrade_user_id, user_secret FROM snaptrade_users WHERE user_id = $1',
+        [req.user.id]
+      )
+      if (!rows.length) {
+        return res.status(404).json({ error: 'SnapTrade user not registered.' })
+      }
+
+      const { snaptrade_user_id: snapUserId, user_secret: userSecret } = rows[0]
+      const holdings = await getHoldings(snapUserId, userSecret)
+      res.json({ holdings, source: 'snaptrade' })
+    } catch (err) {
+      res.status(500).json({ error: err.message })
+    }
+  })
+
+  // List connected brokerage accounts.
+  app.get('/api/snaptrade/accounts', requireAuth, async (req, res) => {
+    try {
+      const { isSnapTradeConfigured, getAccounts } = await import('./services/snaptradeService.js')
+      if (!isSnapTradeConfigured()) {
+        return res.status(503).json({ error: 'SnapTrade not configured' })
+      }
+
+      const { rows } = await pool.query(
+        'SELECT snaptrade_user_id, user_secret FROM snaptrade_users WHERE user_id = $1',
+        [req.user.id]
+      )
+      if (!rows.length) {
+        return res.status(404).json({ error: 'SnapTrade user not registered.' })
+      }
+
+      const { snaptrade_user_id: snapUserId, user_secret: userSecret } = rows[0]
+      const accounts = await getAccounts(snapUserId, userSecret)
+      res.json({ accounts, source: 'snaptrade' })
+    } catch (err) {
+      res.status(500).json({ error: err.message })
+    }
+  })
+
+  // Delete SnapTrade user and remove local record.
+  app.delete('/api/snaptrade/user', requireAuth, async (req, res) => {
+    try {
+      const { isSnapTradeConfigured, deleteUser } = await import('./services/snaptradeService.js')
+      if (!isSnapTradeConfigured()) {
+        return res.status(503).json({ error: 'SnapTrade not configured' })
+      }
+
+      const { rows } = await pool.query(
+        'SELECT snaptrade_user_id, user_secret FROM snaptrade_users WHERE user_id = $1',
+        [req.user.id]
+      )
+      if (!rows.length) {
+        return res.status(204).end()
+      }
+
+      const { snaptrade_user_id: snapUserId, user_secret: userSecret } = rows[0]
+      await deleteUser(snapUserId, userSecret)
+      await pool.query('DELETE FROM snaptrade_users WHERE user_id = $1', [req.user.id])
+      res.status(204).end()
+    } catch (err) {
+      res.status(500).json({ error: err.message })
+    }
+  })
+
+  // Demo holdings — no broker connection required.
+  app.get('/api/snaptrade/demo/holdings', requireAuth, async (_req, res) => {
+    const { getDemoHoldings } = await import('./services/snaptradeService.js')
+    res.json({ holdings: getDemoHoldings(), source: 'demo' })
   })
 
   // Purge expired revoked tokens every hour — keeps the denylist table small

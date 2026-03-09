@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import {
   AreaChart, Area, LineChart, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, ReferenceLine,
@@ -6,8 +6,9 @@ import {
 import {
   TrendingUp, TrendingDown, Search, RefreshCw, Star, StarOff,
   Globe, Bitcoin, BarChart2, ChevronUp, ChevronDown, Activity,
-  ArrowUpRight, ArrowDownRight, Clock, Zap,
+  ArrowUpRight, ArrowDownRight, Clock, Zap, Briefcase,
 } from 'lucide-react'
+import { fetchAssets, fetchPrices, refreshPrices } from '../services/api.js'
 
 // ── API helpers ───────────────────────────────────────────────────────────────
 async function apiFetch(path) {
@@ -222,6 +223,7 @@ export default function Markets() {
   const [overview, setOverview] = useState(null)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
+  const [positionsLoading, setPositionsLoading] = useState(true)
   const [tab, setTab] = useState('indices')    // indices | stocks | crypto
   const [selected, setSelected] = useState(null)
   const [range, setRange] = useState('1mo')
@@ -231,6 +233,8 @@ export default function Markets() {
   })
   const [quote, setQuote] = useState(null)
   const [quoteLoading, setQuoteLoading] = useState(false)
+  const [assets, setAssets] = useState([])
+  const [priceCache, setPriceCache] = useState([])
 
   const loadOverview = useCallback(async () => {
     try {
@@ -251,6 +255,20 @@ export default function Markets() {
 
   useEffect(() => { loadOverview() }, [])
 
+  const loadPositions = useCallback(async () => {
+    try {
+      const [assetData, priceData] = await Promise.all([fetchAssets(), fetchPrices()])
+      setAssets(assetData)
+      setPriceCache(Array.isArray(priceData) ? priceData : [])
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setPositionsLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { loadPositions() }, [loadPositions])
+
   // Load quote for selected symbol
   useEffect(() => {
     if (!selected) return
@@ -263,7 +281,10 @@ export default function Markets() {
 
   function refresh() {
     setRefreshing(true)
-    loadOverview()
+    Promise.all([
+      loadOverview(),
+      refreshPrices().catch(() => null).then(() => loadPositions()),
+    ]).finally(() => setRefreshing(false))
   }
 
   function toggleStar(ticker) {
@@ -292,6 +313,35 @@ export default function Markets() {
 
   const displayQuote = quote && !quoteLoading ? quote : selected
   const changeUp = (displayQuote?.changePct || 0) >= 0
+  const livePriceMap = useMemo(() => {
+    const mapped = new Map()
+    for (const item of priceCache) {
+      if (item?.symbol) mapped.set(String(item.symbol).toUpperCase(), Number(item.price || 0))
+    }
+    return mapped
+  }, [priceCache])
+  const portfolioPositions = useMemo(() => {
+    return assets
+      .filter((asset) => ['STOCKS', 'CRYPTO'].includes(asset.category))
+      .map((asset) => {
+        const livePrice = asset.ticker ? livePriceMap.get(String(asset.ticker).toUpperCase()) : null
+        const quantity = Number(asset.quantity || 0)
+        const marketValue = livePrice && quantity > 0 ? livePrice * quantity : Number(asset.value || 0)
+        const costBasis = Number(asset.cost || 0)
+        const pnl = marketValue - costBasis
+        const pnlPct = costBasis > 0 ? (pnl / costBasis) * 100 : 0
+
+        return {
+          ...asset,
+          livePrice,
+          marketValue,
+          pnl,
+          pnlPct,
+        }
+      })
+      .sort((a, b) => b.marketValue - a.marketValue)
+  }, [assets, livePriceMap])
+  const trackedValue = portfolioPositions.reduce((sum, item) => sum + item.marketValue, 0)
 
   // Build indices sorted for comparison bar
   const indicesSorted = [...(overview?.indices || [])].sort((a, b) => (b.changePct || 0) - (a.changePct || 0))
@@ -435,6 +485,77 @@ export default function Markets() {
                     <p className="text-sm font-mono font-bold" style={{ color: up === false ? 'var(--app-danger)' : up ? 'var(--app-success)' : 'var(--app-text)' }}>{value}</p>
                   </div>
                 ))}
+              </div>
+
+              <div className="rounded-2xl border p-5" style={{ background: 'var(--app-surface)', borderColor: 'var(--app-border)' }}>
+                <div className="flex items-center gap-2 mb-4">
+                  <Briefcase className="h-4 w-4" style={{ color: 'var(--app-accent)' }} />
+                  <div>
+                    <h2 className="text-sm font-bold" style={{ color: 'var(--app-text)' }}>Your Live Stock & Crypto Positions</h2>
+                    <p className="text-[11px]" style={{ color: 'var(--app-text-muted)' }}>
+                      {portfolioPositions.length
+                        ? `${portfolioPositions.length} tracked positions · ${fmtCompact(trackedValue)} combined value`
+                        : 'No stock or crypto positions imported yet'}
+                    </p>
+                  </div>
+                </div>
+
+                {positionsLoading ? (
+                  <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--app-text-muted)' }}>
+                    <RefreshCw className="h-4 w-4 animate-spin" />
+                    Loading your positions...
+                  </div>
+                ) : portfolioPositions.length ? (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr style={{ color: 'var(--app-text-muted)', borderBottom: '1px solid var(--app-border)' }}>
+                          {['Asset', 'Type', 'Qty', 'Live Price', 'Market Value', 'P&L', 'Return'].map((header) => (
+                            <th key={header} className={`pb-2 font-semibold uppercase tracking-wide text-[10px] ${header === 'Asset' || header === 'Type' ? 'text-left' : 'text-right'}`}>
+                              {header}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {portfolioPositions.map((position, index) => {
+                          const up = position.pnl >= 0
+                          return (
+                            <tr
+                              key={position.id}
+                              className="cursor-pointer transition-colors hover:bg-white/[0.03]"
+                              style={{ borderBottom: index < portfolioPositions.length - 1 ? '1px solid var(--app-border)' : 'none' }}
+                              onClick={() => position.ticker && handleSelect({ ticker: position.ticker, label: position.name, price: position.livePrice || position.marketValue, type: position.category === 'CRYPTO' ? 'crypto' : 'stock' }, position.category === 'CRYPTO' ? 'crypto' : 'stock')}
+                            >
+                              <td className="py-2.5 font-semibold" style={{ color: 'var(--app-text)' }}>
+                                {position.name}
+                                {position.ticker ? <span className="ml-2 text-[10px]" style={{ color: 'var(--app-text-muted)' }}>{position.ticker}</span> : null}
+                              </td>
+                              <td className="py-2.5" style={{ color: 'var(--app-text-soft)' }}>{position.category}</td>
+                              <td className="py-2.5 text-right font-mono" style={{ color: 'var(--app-text-soft)' }}>{position.quantity ? fmt(position.quantity, 4) : '—'}</td>
+                              <td className="py-2.5 text-right font-mono" style={{ color: 'var(--app-text)' }}>
+                                {position.livePrice ? `$${fmt(position.livePrice, position.livePrice > 1 ? 2 : 4)}` : 'Manual'}
+                              </td>
+                              <td className="py-2.5 text-right font-mono font-semibold" style={{ color: 'var(--app-text)' }}>
+                                ${fmt(position.marketValue, 2)}
+                              </td>
+                              <td className="py-2.5 text-right font-mono" style={{ color: up ? 'var(--app-success)' : 'var(--app-danger)' }}>
+                                {up ? '+' : ''}${fmt(position.pnl, 2)}
+                              </td>
+                              <td className="py-2.5 text-right font-semibold" style={{ color: up ? 'var(--app-success)' : 'var(--app-danger)' }}>
+                                {fmtPct(position.pnlPct)}
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <p className="text-sm" style={{ color: 'var(--app-text-muted)' }}>
+                    Add manual holdings, connect moomoo, or save crypto wallets during onboarding to populate this section.
+                  </p>
+                )}
               </div>
 
               {/* ── Price chart ── */}

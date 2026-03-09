@@ -102,6 +102,14 @@ export const sqliteSchema = `
     connected_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
+  CREATE TABLE IF NOT EXISTS snaptrade_users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE UNIQUE,
+    snaptrade_user_id VARCHAR(120) NOT NULL,
+    user_secret TEXT NOT NULL,
+    connected_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
   -- Indexes
   CREATE INDEX IF NOT EXISTS idx_users_username ON users (username);
   CREATE INDEX IF NOT EXISTS idx_users_email ON users (email);
@@ -118,6 +126,7 @@ export const sqliteSchema = `
   CREATE INDEX IF NOT EXISTS idx_audit_log_user_created ON audit_log (user_id, created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_plaid_items_user ON plaid_items (user_id);
   CREATE INDEX IF NOT EXISTS idx_ocbc_connections_user ON ocbc_connections (user_id);
+  CREATE INDEX IF NOT EXISTS idx_snaptrade_users_user ON snaptrade_users (user_id);
 `
 
 export default sqliteSchema

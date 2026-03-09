@@ -147,6 +147,16 @@ export const schema = `
   );
 
   CREATE INDEX IF NOT EXISTS idx_ocbc_connections_user ON ocbc_connections (user_id);
+
+  CREATE TABLE IF NOT EXISTS snaptrade_users (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE UNIQUE,
+    snaptrade_user_id VARCHAR(120) NOT NULL,
+    user_secret TEXT NOT NULL,
+    connected_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_snaptrade_users_user ON snaptrade_users (user_id);
 `
 
 export async function ensureSystemSeedUser(client) {

@@ -1,15 +1,13 @@
 import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
-import { LayoutDashboard, Wallet, PlusCircle, Lightbulb, Shield, LogOut, Calculator, Sparkles, ChevronLeft, ChevronRight } from 'lucide-react'
+import { LayoutDashboard, Wallet, Lightbulb, Shield, LogOut, Calculator, ChevronLeft, ChevronRight } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext.jsx'
-import { useChat } from '../context/ChatContext.jsx'
 import { useSidebar } from '../context/SidebarContext.jsx'
 import CalculatorModal from './Calculator.jsx'
 
 const navItems = [
   { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/assets',    icon: Wallet,          label: 'Assets' },
-  { to: '/add',       icon: PlusCircle,      label: 'Add Asset' },
   { to: '/insights',  icon: Lightbulb,       label: 'Insights' },
 ]
 
@@ -42,7 +40,6 @@ function Tip({ label, collapsed, children }) {
 
 export default function Sidebar() {
   const { user, logout } = useAuth()
-  const { toggleChat, isOpen } = useChat()
   const { collapsed, toggle } = useSidebar()
   const [showCalc, setShowCalc] = useState(false)
 
@@ -51,10 +48,7 @@ export default function Sidebar() {
   return (
     <aside
       className={`app-sidebar fixed left-0 z-50 flex flex-col transition-all duration-300 ease-in-out ${w}`}
-      style={{
-        top: '0',
-        height: '100vh',
-      }}
+      style={{ top: '0', height: '100vh' }}
     >
       {/* ── Header ──────────────────────────────────────────── */}
       <div
@@ -79,8 +73,7 @@ export default function Sidebar() {
         {/* Collapse toggle */}
         <button
           onClick={toggle}
-          className={`absolute -right-3 top-1/2 -translate-y-1/2 h-6 w-6 rounded-full flex items-center justify-center shadow-md transition-colors z-10
-            hover:bg-accent/10`}
+          className="absolute -right-3 top-1/2 -translate-y-1/2 h-6 w-6 rounded-full flex items-center justify-center shadow-md transition-colors z-10 hover:bg-accent/10"
           style={{ background: 'var(--app-surface-strong)', border: '1px solid var(--app-border)', color: 'var(--app-text-muted)' }}
           title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         >
@@ -113,7 +106,7 @@ export default function Sidebar() {
           </Tip>
         ))}
 
-        <Tip label="Calculator" collapsed={collapsed}>
+        <Tip label="Add Asset" collapsed={collapsed}>
           <button
             type="button"
             onClick={() => setShowCalc(true)}
@@ -122,24 +115,7 @@ export default function Sidebar() {
             }`}
           >
             <Calculator className="h-[18px] w-[18px] flex-shrink-0" />
-            {!collapsed && 'Calculator'}
-          </button>
-        </Tip>
-
-        <Tip label="WealthAI" collapsed={collapsed}>
-          <button
-            type="button"
-            onClick={toggleChat}
-            className={`flex w-full items-center rounded-2xl py-3 text-sm font-medium transition-all duration-200 ${
-              collapsed ? 'justify-center px-0' : 'gap-3 px-4'
-            } ${
-              isOpen
-                ? 'border border-accent/20 bg-accent/10 text-accent'
-                : 'text-white/50 hover:bg-white/[0.04] hover:text-white/80'
-            }`}
-          >
-            <Sparkles className="h-[18px] w-[18px] flex-shrink-0" />
-            {!collapsed && 'WealthAI'}
+            {!collapsed && 'Add Asset'}
           </button>
         </Tip>
       </nav>

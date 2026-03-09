@@ -226,6 +226,36 @@ export async function fetchIbkrDemoPositions() {
   return request('/api/ibkr/demo/positions')
 }
 
+// ── Live price lookup ─────────────────────────────────────────
+export async function lookupPrice(symbol, type = 'stock') {
+  return request(`/api/prices/lookup?symbol=${encodeURIComponent(symbol)}&type=${type}`)
+}
+
+// ── SnapTrade brokerage aggregation ──────────────────────────
+export async function snaptradeRegister() {
+  return request('/api/snaptrade/register', { method: 'POST' })
+}
+
+export async function snaptradeLogin() {
+  return request('/api/snaptrade/login', { method: 'POST' })
+}
+
+export async function fetchSnaptradeHoldings() {
+  return request('/api/snaptrade/holdings')
+}
+
+export async function fetchSnaptradeAccounts() {
+  return request('/api/snaptrade/accounts')
+}
+
+export async function deleteSnaptradeUser() {
+  return request('/api/snaptrade/user', { method: 'DELETE' })
+}
+
+export async function fetchSnaptradeDemoHoldings() {
+  return request('/api/snaptrade/demo/holdings')
+}
+
 // ── AI Chat ───────────────────────────────────────────────────
 export async function sendChatMessage(messages, portfolioContext = null) {
   return request('/api/chat', {
@@ -249,4 +279,20 @@ export async function fetchOcbcStatus() {
 
 export async function disconnectOcbc() {
   return request('/api/ocbc/connection', { method: 'DELETE' })
+}
+
+export async function fetchSingpassAuthUrl() {
+  return request('/api/singpass/auth-url')
+}
+
+export async function fetchSingpassData() {
+  return request('/api/singpass/data')
+}
+
+export async function disconnectSingpass() {
+  return request('/api/singpass/disconnect', { method: 'DELETE' })
+}
+
+export async function lookupPropertyByPostcode(postcode) {
+  return request(`/api/property/lookup?postcode=${encodeURIComponent(postcode)}`)
 }
