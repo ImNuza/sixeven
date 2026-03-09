@@ -95,6 +95,7 @@ export async function createUserAccount(pool, { username, password, email }) {
       [trimmedUsername, encryptedEmail, emailHmac, passwordHash]
     )
 
+    // await seedStarterPortfolio(client, rows[0].id)
     await client.query('COMMIT')
 
     const user = sanitizeUser(rows[0])
