@@ -17,6 +17,7 @@ const ALGO = 'aes-256-gcm'
 const IV_BYTES = 12    // 96-bit IV — optimal for GCM
 const TAG_BYTES = 16   // 128-bit auth tag — NIST recommended
 const VERSION = 'v1'
+const ENCRYPTED_JSON_KEY = '__enc'
 
 function parseEncryptionKey(rawValue) {
   const raw = String(rawValue || '').trim()
@@ -88,7 +89,7 @@ export function decrypt(ciphertext) {
  */
 export function encryptJSON(obj) {
   if (obj == null) return obj
-  return encrypt(JSON.stringify(obj))
+  return { [ENCRYPTED_JSON_KEY]: encrypt(JSON.stringify(obj)) }
 }
 
 /**
@@ -96,8 +97,15 @@ export function encryptJSON(obj) {
  */
 export function decryptJSON(ciphertext) {
   if (ciphertext == null) return ciphertext
-  // Already a plain object (in-memory before encryption or legacy)
-  if (typeof ciphertext === 'object') return ciphertext
+  if (typeof ciphertext === 'object') {
+    const wrapped = ciphertext?.[ENCRYPTED_JSON_KEY]
+    if (typeof wrapped === 'string') {
+      const str = decrypt(wrapped)
+      try { return JSON.parse(str) } catch { return str }
+    }
+    // Already a plain object (in-memory before encryption or legacy)
+    return ciphertext
+  }
   const str = decrypt(String(ciphertext))
   try { return JSON.parse(str) } catch { return str }
 }
