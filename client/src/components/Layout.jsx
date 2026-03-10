@@ -10,6 +10,8 @@ import { useAuth } from '../auth/AuthContext.jsx'
 
 const FLOATING_CHAT_MARGIN = 24
 const FLOATING_CHAT_STORAGE_KEY = 'safeseven.wealthai.position'
+const DEFAULT_BUTTON_WIDTH = 132
+const DEFAULT_BUTTON_HEIGHT = 44
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value))
@@ -19,37 +21,51 @@ function getStorageKey(userId) {
   return `${FLOATING_CHAT_STORAGE_KEY}:${userId || 'anon'}`
 }
 
+function getDefaultFloatingPosition() {
+  if (typeof window === 'undefined') {
+    return { x: FLOATING_CHAT_MARGIN, y: FLOATING_CHAT_MARGIN }
+  }
+
+  return {
+    x: Math.max(FLOATING_CHAT_MARGIN, window.innerWidth - DEFAULT_BUTTON_WIDTH - FLOATING_CHAT_MARGIN),
+    y: Math.max(FLOATING_CHAT_MARGIN, window.innerHeight - DEFAULT_BUTTON_HEIGHT - FLOATING_CHAT_MARGIN),
+  }
+}
+
+function clampFloatingPosition(position, rect = { width: DEFAULT_BUTTON_WIDTH, height: DEFAULT_BUTTON_HEIGHT }) {
+  if (typeof window === 'undefined') {
+    return position
+  }
+
+  const maxX = Math.max(FLOATING_CHAT_MARGIN, window.innerWidth - rect.width - FLOATING_CHAT_MARGIN)
+  const maxY = Math.max(FLOATING_CHAT_MARGIN, window.innerHeight - rect.height - FLOATING_CHAT_MARGIN)
+
+  return {
+    x: clamp(Number(position?.x ?? FLOATING_CHAT_MARGIN), FLOATING_CHAT_MARGIN, maxX),
+    y: clamp(Number(position?.y ?? FLOATING_CHAT_MARGIN), FLOATING_CHAT_MARGIN, maxY),
+  }
+}
+
 function loadFloatingPosition(userId) {
   if (typeof window === 'undefined') {
-    return 'bottom-right'
+    return getDefaultFloatingPosition()
   }
 
   try {
     const raw = window.localStorage.getItem(getStorageKey(userId))
-    if (['top-left', 'top-right', 'bottom-left', 'bottom-right'].includes(raw)) {
-      return raw
+    if (!raw) {
+      return getDefaultFloatingPosition()
+    }
+
+    const parsed = JSON.parse(raw)
+    if (Number.isFinite(parsed?.x) && Number.isFinite(parsed?.y)) {
+      return clampFloatingPosition(parsed)
     }
   } catch {
     // Ignore storage failures and fall back to default.
   }
 
-  return 'bottom-right'
-}
-
-function getCornerStyle(position) {
-  const base = { top: 'auto', right: 'auto', bottom: 'auto', left: 'auto' }
-
-  if (position === 'top-left') {
-    return { ...base, top: `${FLOATING_CHAT_MARGIN}px`, left: `${FLOATING_CHAT_MARGIN}px` }
-  }
-  if (position === 'top-right') {
-    return { ...base, top: `${FLOATING_CHAT_MARGIN}px`, right: `${FLOATING_CHAT_MARGIN}px` }
-  }
-  if (position === 'bottom-left') {
-    return { ...base, bottom: `${FLOATING_CHAT_MARGIN}px`, left: `${FLOATING_CHAT_MARGIN}px` }
-  }
-
-  return { ...base, bottom: `${FLOATING_CHAT_MARGIN}px`, right: `${FLOATING_CHAT_MARGIN}px` }
+  return getDefaultFloatingPosition()
 }
 
 export default function Layout() {
@@ -68,8 +84,21 @@ export default function Layout() {
   }, [user?.id])
 
   useEffect(() => {
+    function handleResize() {
+      const rect = buttonRef.current?.getBoundingClientRect() || {
+        width: DEFAULT_BUTTON_WIDTH,
+        height: DEFAULT_BUTTON_HEIGHT,
+      }
+      setFloatingPosition((current) => clampFloatingPosition(current, rect))
+    }
+
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [])
+
+  useEffect(() => {
     try {
-      window.localStorage.setItem(getStorageKey(user?.id), floatingPosition)
+      window.localStorage.setItem(getStorageKey(user?.id), JSON.stringify(floatingPosition))
     } catch {
       // Ignore storage failures.
     }
@@ -97,12 +126,7 @@ export default function Layout() {
         if (didDrag) {
           justDraggedUntilRef.current = Date.now() + 250
         }
-
-        const centerX = current.x + current.rect.width / 2
-        const centerY = current.y + current.rect.height / 2
-        const horizontal = centerX < window.innerWidth / 2 ? 'left' : 'right'
-        const vertical = centerY < window.innerHeight / 2 ? 'top' : 'bottom'
-        setFloatingPosition(`${vertical}-${horizontal}`)
+        setFloatingPosition(clampFloatingPosition({ x: current.x, y: current.y }, current.rect))
         dragMetaRef.current = null
         return null
       })
@@ -157,7 +181,7 @@ export default function Layout() {
       <ChatPanel />
       <ToastContainer />
 
-      {/* Draggable WealthAI toggle — snaps to the nearest corner */}
+      {/* Draggable WealthAI toggle — freely placeable anywhere on screen */}
       {!isOpen && (
         <button
           ref={buttonRef}
@@ -169,12 +193,15 @@ export default function Layout() {
               ? {
                   top: `${dragState.y}px`,
                   left: `${dragState.x}px`,
-                  right: 'auto',
-                  bottom: 'auto',
-                  transform: 'none',
-                  transition: 'none',
                 }
-              : getCornerStyle(floatingPosition)),
+              : {
+                  top: `${floatingPosition.y}px`,
+                  left: `${floatingPosition.x}px`,
+                }),
+            right: 'auto',
+            bottom: 'auto',
+            transform: 'none',
+            transition: dragState ? 'none' : undefined,
             background: 'var(--app-accent)',
             boxShadow: '0 4px 20px color-mix(in srgb, var(--app-accent) 40%, transparent)',
             cursor: dragState ? 'grabbing' : 'grab',
