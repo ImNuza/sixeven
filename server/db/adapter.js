@@ -101,7 +101,12 @@ class SQLiteClient {
   async query(sql, params = []) {
     const { sql: convertedSql, params: convertedParams } = convertSqlForSqlite(sql, params)
     // Stringify objects for SQLite TEXT columns
-    const finalParams = convertedParams.map(p => typeof p === 'object' && p !== null ? JSON.stringify(p) : p)
+    const finalParams = convertedParams.map(p => {
+      if (p === undefined) return null
+      if (typeof p === 'boolean') return p ? 1 : 0
+      if (typeof p === 'object' && p !== null) return JSON.stringify(p)
+      return p
+    })
     const trimmedSql = convertedSql.trim().toUpperCase()
     
     try {

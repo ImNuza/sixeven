@@ -353,6 +353,54 @@ async function persistPortfolioAssets(values, propertyLookup) {
   return createdAssets
 }
 
+function inferMomooCurrency(code) {
+  if (code.endsWith('.SI')) return 'SGD'
+  if (code.endsWith('.HK')) return 'HKD'
+  return 'USD'
+}
+
+function normalizeMoomooTicker(code) {
+  if (!code) return ''
+  if (code.endsWith('.SI')) return code
+  if (code.endsWith('.HK')) return code.replace(/^(\d+)\.HK$/, (_, n) => n.padStart(4, '0') + '.HK')
+  if (code.endsWith('.US')) return code.replace('.US', '')
+  return code
+}
+
+function parseMomooCsv(text) {
+  const lines = text.trim().split(/\r?\n/)
+  if (lines.length < 2) throw new Error('CSV appears empty.')
+  const rawHeaders = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, '').toLowerCase())
+  const col = (aliases) => { for (const a of aliases) { const i = rawHeaders.indexOf(a); if (i !== -1) return i } return -1 }
+  const codeIdx  = col(['stock code', 'code', 'symbol', 'ticker'])
+  const nameIdx  = col(['stock name', 'name', 'security name', 'description'])
+  const qtyIdx   = col(['quantity', 'qty', 'holdings', 'shares', 'position'])
+  const costIdx  = col(['average cost', 'avg cost', 'cost price', 'avg. cost', 'average cost price'])
+  const priceIdx = col(['current price', 'market price', 'last price', 'price', 'latest price'])
+  const valueIdx = col(['market value', 'mkt value', 'market val', 'value'])
+  const pnlIdx   = col(['unrealized p/l', 'unrealised p/l', 'p/l', 'profit/loss', 'unrealized profit/loss', 'unrealised profit/loss', 'pnl'])
+  const currIdx  = col(['currency', 'ccy'])
+  if (codeIdx === -1) throw new Error('Could not find a stock code column. Make sure you export the Positions view from moomoo.')
+  const positions = []
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i].trim()
+    if (!line) continue
+    const cells = line.match(/(".*?"|[^,]+)(?=,|$)/g)?.map(c => c.replace(/^"|"$/g, '').trim()) || line.split(',').map(c => c.trim())
+    const code     = cells[codeIdx] || ''
+    const name     = nameIdx  >= 0 ? cells[nameIdx]  || '' : code
+    const qty      = parseFloat(cells[qtyIdx]   || 0)
+    const cost     = parseFloat(cells[costIdx]  || 0)
+    const price    = parseFloat(cells[priceIdx] || 0)
+    const value    = valueIdx >= 0 ? parseFloat(cells[valueIdx] || 0) : price * qty
+    const pnl      = pnlIdx   >= 0 ? parseFloat(cells[pnlIdx]  || 0) : value - cost * qty
+    const currency = currIdx  >= 0 ? cells[currIdx] || inferMomooCurrency(code) : inferMomooCurrency(code)
+    if (!code || isNaN(qty) || qty <= 0) continue
+    positions.push({ code, ticker: normalizeMoomooTicker(code), name, assetClass: 'STK', quantity: qty, marketPrice: price, marketValue: value || price * qty, currency, avgCost: cost, unrealizedPnl: pnl })
+  }
+  if (!positions.length) throw new Error('No valid positions found in the CSV. Check the file format.')
+  return positions
+}
+
 async function importMoomooPortfolio(payload) {
   const data = await fetchMoomooPositions(payload.openDUrl)
 
@@ -438,6 +486,7 @@ export default function Onboarding() {
     moomooLoading: false,
     moomooImported: false,
     moomooAccountId: '',
+    moomooImportedValue: 0,
     moomooError: '',
     walletSaving: false,
     walletSaved: 0,
@@ -569,6 +618,51 @@ export default function Onboarding() {
       }))
     } catch (err) {
       setIntegrationState((current) => ({ ...current, moomooLoading: false, moomooImported: false, moomooError: err.message || 'moomoo import failed.' }))
+    }
+  }
+
+  async function handleImportMomooCsv(file) {
+    if (!file) return
+    setIntegrationState((current) => ({ ...current, moomooLoading: true, moomooError: '', moomooImported: false }))
+    try {
+      const text = await file.text()
+      const positions = parseMomooCsv(text)
+      const today = new Date().toISOString().split('T')[0]
+      let totalSgd = 0
+      for (const position of positions) {
+        try {
+          const isSgd = position.currency === 'SGD'
+          let rate = 1
+          if (!isSgd) {
+            try { rate = await lookupExchangeRate(position.currency, 'SGD') } catch { rate = 1.35 }
+          }
+          const valueSgd = Math.round(position.marketValue * rate * 100) / 100
+          totalSgd += valueSgd
+          await createAsset({
+            name: position.name || position.ticker,
+            category: 'STOCKS',
+            ticker: position.ticker,
+            quantity: position.quantity,
+            value: valueSgd,
+            cost: position.avgCost > 0 ? Math.round(position.avgCost * position.quantity * rate * 100) / 100 : valueSgd,
+            date: today,
+            institution: 'moomoo SG',
+            details: { importedFrom: 'moomoo', currency: position.currency, originalCode: position.code, conversionRate: rate },
+          })
+        } catch (err) {
+          console.error('[Onboarding] ✗ Failed to import moomoo position:', position.name, err.message)
+        }
+      }
+      setIntegrationState((current) => ({
+        ...current,
+        moomooLoading: false,
+        moomooImported: true,
+        moomooAccountId: `${positions.length} position${positions.length !== 1 ? 's' : ''}`,
+        moomooImportedValue: totalSgd,
+        moomooError: '',
+      }))
+    } catch (err) {
+      setIntegrationState((current) => ({ ...current, moomooLoading: false, moomooImported: false, moomooError: err.message || 'CSV import failed.' }))
     }
   }
 
@@ -985,13 +1079,18 @@ export default function Onboarding() {
                   <LineChart className="h-4 w-4" style={{ color: '#ff7a00' }} />
                   <strong>moomoo positions</strong>
                 </div>
-                <input value={values.moomooOpenDUrl} onChange={(event) => setField('moomooOpenDUrl', event.target.value)} placeholder="OpenD URL (e.g. http://127.0.0.1:33333)" style={{ ...inputStyle(), marginBottom: '0.8rem' }} />
-                <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-                  <button type="button" onClick={handleImportMoomoo} disabled={integrationState.moomooLoading} style={buttonStyle(false)}>
-                    {integrationState.moomooLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Building2 className="h-4 w-4" />}
-                    Import via OpenD
-                  </button>
-                </div>
+                <input
+                  type="file"
+                  accept=".csv"
+                  disabled={integrationState.moomooLoading}
+                  style={{ ...inputStyle(), marginBottom: '0.8rem' }}
+                  onChange={(e) => handleImportMomooCsv(e.target.files?.[0])}
+                />
+                {integrationState.moomooLoading && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'rgba(255,255,255,0.55)', marginBottom: '0.6rem' }}>
+                    <Loader2 className="h-4 w-4 animate-spin" /> Importing…
+                  </div>
+                )}
                 {integrationState.moomooImported && (
                   <p style={{ color: '#86efac', marginTop: '0.6rem' }}>moomoo portfolio imported{integrationState.moomooAccountId ? ` (${integrationState.moomooAccountId})` : ''}.</p>
                 )}
@@ -1053,14 +1152,19 @@ export default function Onboarding() {
           <p style={{ color: 'rgba(255,255,255,0.62)', lineHeight: 1.7, marginBottom: '1rem' }}>
             Your onboarding is complete. SafeSeven will use your answers to build your Wealth Wellness dashboard and personalise future insights.
           </p>
-          <p style={{ color: 'rgba(255,255,255,0.45)', marginBottom: '1.8rem' }}>
+          <p style={{ color: 'rgba(255,255,255,0.45)', marginBottom: integrationState.moomooImported ? '0.5rem' : '1.8rem' }}>
             Estimated assets captured: {formatCurrency(onboardingProfile.estimatedNetWorthTracked)}
           </p>
+          {integrationState.moomooImported && (
+            <p style={{ color: 'rgba(255,255,255,0.45)', marginBottom: '1.8rem' }}>
+              moomoo positions imported: {integrationState.moomooAccountId}{integrationState.moomooImportedValue > 0 ? ` · ${formatCurrency(integrationState.moomooImportedValue)}` : ''}
+            </p>
+          )}
           <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', justifyContent: 'center' }}>
             <button type="button" onClick={() => { console.log('[Onboarding] Navigating to assets with refresh flag'); setTimeout(() => navigate('/assets?refresh=true&sortBy=date&sortDirection=desc', { replace: true }), 500) }} style={buttonStyle(true)}>
               View My Assets <ArrowRight size={16} />
             </button>
-            <button type="button" onClick={() => navigate('/dashboard', { replace: true })} style={buttonStyle(false)}>
+            <button type="button" onClick={() => navigate('/dashboard', { replace: true })} style={buttonStyle(true)}>
               Go to Dashboard
             </button>
           </div>

@@ -752,7 +752,7 @@ CORE PRINCIPLES:
       const existingSet = new Set(existing.map((row) => row.provider))
 
       for (const provider of SUPPORTED_DEMO_PROVIDERS) {
-        const enabled = selectedSet.has(provider)
+        const enabled = selectedSet.has(provider) ? 1 : 0
         const metadata = parseStoredJson(metadataByProvider?.[provider], {})
 
         if (existingSet.has(provider)) {
