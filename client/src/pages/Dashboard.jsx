@@ -780,17 +780,32 @@ function WellnessContent({ breakdown, healthStatus, score }) {
         {breakdown.map(item => (
           <div key={item.label}>
             <div className="flex items-center justify-between mb-1.5">
-              <div className="flex items-center gap-1.5">
-                <span className="text-sm" style={{ color: 'var(--app-text-soft)' }}>{item.label}</span>
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium" style={{ color: 'var(--app-text-soft)' }}>{item.label}</span>
                 <span className="relative group/tip cursor-help">
-                  <Info className="h-3 w-3" style={{ color: 'var(--app-text-muted)', opacity: 0.5 }} />
-                  <span className="pointer-events-none absolute left-5 top-1/2 -translate-y-1/2 z-50 opacity-0 group-hover/tip:opacity-100 transition-opacity w-44 rounded-xl px-2.5 py-1.5 text-[11px] leading-snug shadow-xl"
-                    style={{ background: 'var(--app-surface-strong)', border: '1px solid var(--app-border)', color: 'var(--app-text-soft)' }}>
-                    {item.detail}
-                  </span>
+                  <Info className="h-3.5 w-3.5" style={{ color: 'var(--app-text-muted)', opacity: 0.7 }} />
+                  {/* Enhanced, high-contrast tooltip */}
+                  <div className="pointer-events-none absolute left-6 top-1/2 opacity-0 group-hover/tip:opacity-100 transition-opacity w-60 rounded-xl px-3.5 py-3 text-xs shadow-2xl overflow-visible"
+                    style={{ background: 'rgba(0, 0, 0, 0.85)', border: '1px solid rgba(255, 255, 255, 0.2)', color: '#e8e8e8', lineHeight: '1.6', backdropFilter: 'blur(8px)', transform: 'translateY(-50%)', maxHeight: 'none', zIndex: 9999 }}>
+                    {/* Current value */}
+                    <p className="mb-2.5 pb-2.5" style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.15)', color: item.status === 'pass' ? '#22c55e' : item.status === 'neutral' ? '#3b82f6' : '#ef4444', fontWeight: '600', fontSize: '0.8rem' }}>
+                      {item.currentValue}
+                    </p>
+                    {/* Combined description */}
+                    <p className="mb-3" style={{ color: '#d1d5db' }}>
+                      {item.explanation} {item.whyItMatters && `It matters because ${item.whyItMatters.charAt(0).toLowerCase() + item.whyItMatters.slice(1).split('. ')[0]}.`}
+                    </p>
+                    {/* Action if low (only show if applicable) - with visual highlight */}
+                    {item.actionIfLow && (
+                      <div style={{ background: 'rgba(251, 146, 60, 0.15)', border: '1px solid rgba(251, 146, 60, 0.3)', borderRadius: '0.5rem', padding: '0.625rem', marginTop: '0.5rem' }}>
+                        <p style={{ color: '#fbbf24', fontWeight: '600', marginBottom: '0.375rem', fontSize: '0.8rem' }}>💡 Next Step</p>
+                        <p style={{ color: '#fcd34d', fontSize: '0.75rem' }}>{item.actionIfLow}</p>
+                      </div>
+                    )}
+                  </div>
                 </span>
               </div>
-              <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${item.status === 'pass' ? 'bg-emerald-400/10 text-emerald-400' : item.status === 'neutral' ? 'bg-blue-400/10 text-blue-400' : 'bg-red-400/10 text-red-400'}`}>
+              <span className={`text-xs font-semibold px-2.5 py-0.5 rounded-full ${item.status === 'pass' ? 'bg-emerald-400/10 text-emerald-400' : item.status === 'neutral' ? 'bg-blue-400/10 text-blue-400' : 'bg-red-400/10 text-red-400'}`}>
                 {item.score}/{item.max}
               </span>
             </div>
