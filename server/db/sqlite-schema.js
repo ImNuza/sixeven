@@ -11,6 +11,7 @@ export const sqliteSchema = `
     username VARCHAR(50) NOT NULL UNIQUE,
     email TEXT,
     email_hmac VARCHAR(64),
+    review_reminder_day INTEGER,
     password_hash TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );

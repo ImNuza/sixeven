@@ -11,6 +11,7 @@ export const schema = `
     id SERIAL PRIMARY KEY,
     username VARCHAR(50) NOT NULL UNIQUE,
     email TEXT UNIQUE,
+    review_reminder_day SMALLINT,
     password_hash TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
@@ -48,6 +49,9 @@ export const schema = `
 
   ALTER TABLE users
     ADD COLUMN IF NOT EXISTS email TEXT;
+
+  ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS review_reminder_day SMALLINT;
 
   ALTER TABLE assets
     ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
