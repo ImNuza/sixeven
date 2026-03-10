@@ -61,6 +61,7 @@ export default function Layout() {
   const buttonRef = useRef(null)
   const dragMetaRef = useRef(null)
   const suppressClickRef = useRef(false)
+  const justDraggedUntilRef = useRef(0)
 
   useEffect(() => {
     setFloatingPosition(loadFloatingPosition(user?.id))
@@ -91,7 +92,11 @@ export default function Layout() {
     function handlePointerUp() {
       setDragState((current) => {
         if (!current) return null
-        suppressClickRef.current = Boolean(dragMetaRef.current?.moved)
+        const didDrag = Boolean(dragMetaRef.current?.moved)
+        suppressClickRef.current = didDrag
+        if (didDrag) {
+          justDraggedUntilRef.current = Date.now() + 250
+        }
 
         const centerX = current.x + current.rect.width / 2
         const centerY = current.y + current.rect.height / 2
@@ -130,7 +135,7 @@ export default function Layout() {
   }
 
   function handleFloatingClick() {
-    if (suppressClickRef.current) {
+    if (suppressClickRef.current || Date.now() < justDraggedUntilRef.current) {
       suppressClickRef.current = false
       return
     }
