@@ -7,7 +7,7 @@ import {
   AlertTriangle, CheckCircle, Info, RefreshCw, ShieldCheck, Clock,
   ArrowUpRight, ArrowDownRight, Settings2, GripVertical, EyeOff, Eye, X,
   UserRound, Globe2, Briefcase, Wallet, Landmark, Building2, Link2,
-  Banknote, TrendingUp, Coins, Package, Shield, Home, CalendarDays,
+  Banknote, TrendingUp, Coins, Package, Shield, Home,
 } from 'lucide-react'
 import {
   DndContext, closestCenter, PointerSensor, useSensor, useSensors,
@@ -63,13 +63,6 @@ function formatCurrency(v) {
   return new Intl.NumberFormat('en-SG', { style: 'currency', currency: 'SGD', minimumFractionDigits: 0 }).format(v)
 }
 function formatChange(v) { return `${v >= 0 ? '+' : ''}${formatCurrency(v)}` }
-function formatOrdinalDay(day) {
-  if (!day) return ''
-  const mod100 = day % 100
-  if (mod100 >= 11 && mod100 <= 13) return `${day}th`
-  const suffix = { 1: 'st', 2: 'nd', 3: 'rd' }[day % 10] || 'th'
-  return `${day}${suffix}`
-}
 
 const ChartTooltip = ({ active, payload }) => {
   if (!active || !payload?.length) return null
@@ -197,7 +190,7 @@ function CustomizePanel({ widgets, onClose, onChange }) {
 // ── Main Dashboard ────────────────────────────────────────────
 export default function Dashboard() {
   const notify = useNotify()
-  const { user, updateProfile } = useAuth()
+  const { user } = useAuth()
   const [onboardingProfile, setOnboardingProfile] = useState(() => loadOnboardingProfile(user?.id))
   const [assets, setAssets] = useState([])
   const [summary, setSummary] = useState(null)
