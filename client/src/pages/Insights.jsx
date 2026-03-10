@@ -8,8 +8,6 @@ import { calculateWellnessScore, getWellnessStatus } from '../data/wellnessCalcu
 import { buildPortfolioInsights } from '../data/portfolioInsights.js'
 import { ASSET_CATEGORIES, CATEGORY_COLORS } from '../../../shared/constants.js'
 import { useChat } from '../context/ChatContext.jsx'
-import { useAuth } from '../auth/AuthContext.jsx'
-import { loadOnboardingProfile } from '../onboarding/storage.js'
 import ScenarioSimulator from '../components/ScenarioSimulator.jsx'
 
 function formatCurrency(value) {
@@ -30,16 +28,16 @@ const ACTION_MAP = {
     fail: 'Move more assets into cash, stocks, or crypto to reach 20% liquid.',
     pass: 'Liquidity is on target — keep it above 20%.',
   },
-  Volatility: {
-    fail: 'Trim crypto + FOREX holdings to stay below the risk threshold.',
-    pass: 'Volatility exposure is within the safe range.',
+  'Crypto Exposure': {
+    fail: 'Trim crypto holdings to stay below the 30% risk threshold.',
+    pass: 'Crypto exposure is within the safe range.',
   },
   'Emergency Fund': {
-    fail: 'Build your cash buffer — target enough months of living expenses based on your spending.',
-    pass: 'Emergency fund meets the target.',
+    fail: 'Build your cash buffer — target 6 months of living expenses (≈ S$18,000).',
+    pass: 'Emergency fund meets the 6-month target.',
   },
   Concentration: {
-    fail: 'Your largest single asset exceeds the limit — spread risk across more positions.',
+    fail: 'Your largest single asset exceeds 25% — spread risk across more positions.',
     pass: 'No single asset dominates the portfolio.',
   },
   'Growth Trend': {
@@ -51,18 +49,9 @@ const ACTION_MAP = {
     fail: 'Consider adding bonds, CPF top-ups, or dividend stocks for passive income.',
     pass: 'Good allocation to income-generating assets.',
   },
-  'Debt Health': {
-    fail: 'Debt ratio is high — prioritise paying down liabilities before taking on more.',
-    pass: 'Debt is at a manageable level relative to assets.',
-  },
   Rebalancing: {
     fail: 'Allocation has drifted from targets — consider rebalancing now.',
     pass: 'Portfolio is well-aligned with target allocation.',
-  },
-  'Savings Rate': {
-    fail: 'You\'re saving less than 20% of income — look for ways to reduce expenses or boost income.',
-    pass: 'Healthy savings rate — keep building your wealth cushion.',
-    neutral: 'Add your income and expenses in onboarding to unlock personalised savings insights.',
   },
 }
 
@@ -79,23 +68,11 @@ const LIQUIDITY_LABELS = {
 
 export default function Insights() {
   const { openChat, setPortfolioContext } = useChat()
-  const { user } = useAuth()
   const [assets, setAssets] = useState([])
   const [summary, setSummary] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [isRefreshing, setIsRefreshing] = useState(false)
-  const [onboardingProfile, setOnboardingProfile] = useState(() => loadOnboardingProfile(user?.id))
-
-  useEffect(() => {
-    setOnboardingProfile(loadOnboardingProfile(user?.id))
-  }, [user?.id])
-
-  useEffect(() => {
-    function syncProfile() { setOnboardingProfile(loadOnboardingProfile(user?.id)) }
-    window.addEventListener('safeseven:onboarding', syncProfile)
-    return () => window.removeEventListener('safeseven:onboarding', syncProfile)
-  }, [user?.id])
 
   useEffect(() => {
     let cancelled = false
@@ -119,16 +96,16 @@ export default function Insights() {
   }, [])
 
   const { score, breakdown } = useMemo(
-    () => calculateWellnessScore(assets, { monthlyChangePct: summary?.monthlyChangePct ?? null, userProfile: onboardingProfile }),
-    [assets, summary, onboardingProfile]
+    () => calculateWellnessScore(assets, { monthlyChangePct: summary?.monthlyChangePct ?? null }),
+    [assets, summary]
   )
   const healthStatus = useMemo(() => getWellnessStatus(score), [score])
-  buildPortfolioInsights(assets, summary, [], onboardingProfile) // keep context alive
+  buildPortfolioInsights(assets, summary) // keep context alive
 
   const actions = useMemo(() => breakdown
     .map(item => ({
       ...item,
-      action: item.goalHint || ACTION_MAP[item.label]?.[item.status] || '',
+      action: ACTION_MAP[item.label]?.[item.status] ?? '',
       deficit: item.max - item.score,
     }))
     .sort((a, b) => b.deficit - a.deficit),
@@ -173,14 +150,8 @@ export default function Insights() {
       `Asset categories: ${[...new Set(assets.map(a => a.category))].join(', ')}`,
       `Total assets: ${assets.length}`,
     ]
-    if (onboardingProfile) {
-      if (onboardingProfile.financialGoals?.length) lines.push(`Financial goals: ${onboardingProfile.financialGoals.join(', ')}`)
-      if (onboardingProfile.incomeRange) lines.push(`Income range: ${onboardingProfile.incomeRange}`)
-      if (onboardingProfile.monthlyExpensesRange) lines.push(`Monthly expenses: ${onboardingProfile.monthlyExpensesRange}`)
-      if (onboardingProfile.riskAppetite) lines.push(`Risk appetite: ${onboardingProfile.riskAppetite}`)
-    }
     setPortfolioContext(lines.join('\n'))
-  }, [score, healthStatus, summary, fails, assets, onboardingProfile, setPortfolioContext])
+  }, [score, healthStatus, summary, fails, assets, setPortfolioContext])
 
   async function handleRefresh() {
     try {
@@ -324,8 +295,8 @@ export default function Insights() {
           </div>
         )}
 
-        {/* 10-Factor compact grid */}
-        <div className="pt-4 border-t border-white/[0.05] grid grid-cols-5 gap-x-5 gap-y-3">
+        {/* 8-Factor compact grid */}
+        <div className="pt-4 border-t border-white/[0.05] grid grid-cols-4 gap-x-5 gap-y-3">
           {breakdown.map(item => (
             <div key={item.label}>
               <div className="flex items-center justify-between mb-1">
@@ -511,7 +482,7 @@ export default function Insights() {
       </div>
 
       {/* ── Section 5: Scenario Lab ──────────────────────────── */}
-      <ScenarioSimulator assets={assets} userProfile={onboardingProfile} summary={summary} />
+      <ScenarioSimulator assets={assets} />
 
     </div>
   )

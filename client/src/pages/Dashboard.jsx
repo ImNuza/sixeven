@@ -7,7 +7,7 @@ import {
   AlertTriangle, CheckCircle, Info, RefreshCw, ShieldCheck, Clock,
   ArrowUpRight, ArrowDownRight, Settings2, GripVertical, EyeOff, Eye, X,
   UserRound, Globe2, Briefcase, Wallet, Landmark, Building2, Link2,
-  Banknote, TrendingUp, Coins, Package, Shield, Home, CalendarDays,
+  Banknote, TrendingUp, Coins, Package, Shield, Home,
 } from 'lucide-react'
 import {
   DndContext, closestCenter, PointerSensor, useSensor, useSensors,
@@ -37,7 +37,6 @@ const DEFAULT_WIDGETS = [
   { id: 'allocation', label: 'Asset Allocation', span: 'small' },
   { id: 'wellness',   label: 'Wellness Score',   span: 'half' },
   { id: 'insights',   label: 'Quick Insights',   span: 'half' },
-  { id: 'reviews',    label: 'Review Schedule',  span: 'full' },
   { id: 'holdings',   label: 'Top Holdings',     span: 'full' },
 ]
 
@@ -64,13 +63,6 @@ function formatCurrency(v) {
   return new Intl.NumberFormat('en-SG', { style: 'currency', currency: 'SGD', minimumFractionDigits: 0 }).format(v)
 }
 function formatChange(v) { return `${v >= 0 ? '+' : ''}${formatCurrency(v)}` }
-function formatOrdinalDay(day) {
-  if (!day) return ''
-  const mod100 = day % 100
-  if (mod100 >= 11 && mod100 <= 13) return `${day}th`
-  const suffix = { 1: 'st', 2: 'nd', 3: 'rd' }[day % 10] || 'th'
-  return `${day}${suffix}`
-}
 
 const ChartTooltip = ({ active, payload }) => {
   if (!active || !payload?.length) return null
@@ -198,7 +190,7 @@ function CustomizePanel({ widgets, onClose, onChange }) {
 // ── Main Dashboard ────────────────────────────────────────────
 export default function Dashboard() {
   const notify = useNotify()
-  const { user, updateProfile } = useAuth()
+  const { user } = useAuth()
   const [onboardingProfile, setOnboardingProfile] = useState(() => loadOnboardingProfile(user?.id))
   const [assets, setAssets] = useState([])
   const [summary, setSummary] = useState(null)
@@ -244,10 +236,6 @@ export default function Dashboard() {
   }, [user?.id])
 
   useEffect(() => {
-    setReviewReminderDay(user?.reviewReminderDay ?? null)
-  }, [user?.reviewReminderDay])
-
-  useEffect(() => {
     function syncOnboardingProfile() {
       setOnboardingProfile(loadOnboardingProfile(user?.id))
     }
@@ -256,12 +244,12 @@ export default function Dashboard() {
     return () => window.removeEventListener('safeseven:onboarding', syncOnboardingProfile)
   }, [user?.id])
 
-  const { score, breakdown, goalHints } = useMemo(
-    () => calculateWellnessScore(assets, { monthlyChangePct: summary?.monthlyChangePct ?? null, userProfile: onboardingProfile }),
-    [assets, summary, onboardingProfile]
+  const { score, breakdown } = useMemo(
+    () => calculateWellnessScore(assets, { monthlyChangePct: summary?.monthlyChangePct ?? null }),
+    [assets, summary]
   )
   const healthStatus = useMemo(() => getWellnessStatus(score), [score])
-  const insights = useMemo(() => buildPortfolioInsights(assets, summary, prices, onboardingProfile), [assets, prices, summary, onboardingProfile])
+  const insights = useMemo(() => buildPortfolioInsights(assets, summary, prices), [assets, prices, summary])
 
   const pieData = useMemo(() => {
     const grouped = {}
@@ -337,27 +325,6 @@ export default function Dashboard() {
     notify({ type: 'info', title: 'Dashboard updated', message: 'Your layout has been saved.' })
   }
 
-  async function handleSaveReviewReminder() {
-    try {
-      setIsSavingReviewDay(true)
-      await updateProfile({
-        email: user?.email || '',
-        reviewReminderDay,
-      })
-      notify({
-        type: 'success',
-        title: reviewReminderDay ? 'Review schedule saved' : 'Review schedule cleared',
-        message: reviewReminderDay
-          ? `Monthly review set for the ${formatOrdinalDay(reviewReminderDay)}.`
-          : 'Monthly review reminder removed.',
-      })
-    } catch (err) {
-      notify({ type: 'error', title: 'Schedule save failed', message: err.message })
-    } finally {
-      setIsSavingReviewDay(false)
-    }
-  }
-
   // ── Export helpers ────────────────────────────────────────
   function getExportData() {
     const kpis = [
@@ -415,7 +382,7 @@ export default function Dashboard() {
       <div className="flex items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold" style={{ color: 'var(--app-text)' }}>
-            Wealth Dashboard
+            {viewMode === 'advisor' ? 'Advisor Overview' : 'Wealth Dashboard'}
           </h1>
           {onboardingProfile?.fullName && (
             <p className="mt-1 text-sm" style={{ color: 'var(--app-text-muted)' }}>
@@ -431,6 +398,26 @@ export default function Dashboard() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {/* Client / Advisor toggle */}
+          <div className="flex items-center rounded-xl border p-1" style={{ borderColor: 'var(--app-border)', background: 'var(--app-surface)' }}>
+            {[
+              { id: 'client',  label: 'Client View',  icon: UserRound },
+              { id: 'advisor', label: 'Advisor View', icon: ShieldCheck },
+            ].map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setViewMode(id)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-150"
+                style={viewMode === id
+                  ? { background: 'var(--app-accent)', color: '#fff' }
+                  : { color: 'var(--app-text-muted)' }}
+              >
+                <Icon className="h-3.5 w-3.5" />
+                {label}
+              </button>
+            ))}
+          </div>
           <ExportMenu onExportPDF={handleExportPDF} onExportExcel={handleExportExcel} />
           <button
             type="button"
@@ -644,19 +631,6 @@ export default function Dashboard() {
           )
         }
 
-        if (widget.id === 'reviews') {
-          return (
-            <div key="reviews">
-              <ReviewScheduleCard
-                reviewReminderDay={reviewReminderDay}
-                onSelectDay={setReviewReminderDay}
-                onSave={handleSaveReviewReminder}
-                isSaving={isSavingReviewDay}
-              />
-            </div>
-          )
-        }
-
         if (widget.id === 'holdings' && topHoldings.length > 0) {
           return (
             <div key="holdings" className="glass-card p-6">
@@ -702,7 +676,18 @@ export default function Dashboard() {
         </div>
       )}
 
-
+      {/* ── Advisor Panel ────────────────────────────────────── */}
+      {viewMode === 'advisor' && (
+        <AdvisorPanel
+          assets={assets}
+          summary={summary}
+          breakdown={breakdown}
+          score={score}
+          totalNetWorth={totalNetWorth}
+          pieData={pieData}
+          insights={insights}
+        />
+      )}
 
       {showCustomize && (
         <CustomizePanel widgets={widgets} onClose={() => setShowCustomize(false)} onChange={handleWidgetChange} />
@@ -712,120 +697,6 @@ export default function Dashboard() {
 }
 
 // ── Sub-components ────────────────────────────────────────────
-function ReviewScheduleCard({ reviewReminderDay, onSelectDay, onSave, isSaving }) {
-  const days = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
-  const weeks = [
-    [1, 2, 3, 4, 5, 6, 7],
-    [8, 9, 10, 11, 12, 13, 14],
-    [15, 16, 17, 18, 19, 20, 21],
-    [22, 23, 24, 25, 26, 27, 28],
-  ]
-
-  return (
-    <div
-      className="rounded-[2rem] border p-6 md:p-8"
-      style={{
-        background: 'linear-gradient(135deg, rgba(255,255,255,0.92), rgba(249,247,241,0.88))',
-        borderColor: 'rgba(15,23,42,0.05)',
-        boxShadow: '0 10px 35px rgba(15,23,42,0.10)',
-      }}
-    >
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <p className="mb-2 text-[11px] uppercase tracking-[0.28em]" style={{ color: '#c9a13e' }}>Grow</p>
-          <h3 className="text-[2rem] font-semibold tracking-tight" style={{ color: '#17203a' }}>Scheduled wealth reviews</h3>
-          <p className="mt-2 text-lg" style={{ color: '#64748b' }}>Set it once. Stay on track forever.</p>
-          <p className="mt-3 text-sm" style={{ color: '#64748b' }}>
-            Choose a monthly reminder day to review and update your assets from the dashboard.
-          </p>
-        </div>
-        <div
-          className="hidden md:flex h-12 w-12 items-center justify-center rounded-2xl"
-          style={{ background: 'rgba(201,161,62,0.14)', color: '#c9a13e' }}
-        >
-          <CalendarDays className="h-5 w-5" />
-        </div>
-      </div>
-
-      <div className="mt-8">
-        <div className="grid grid-cols-7 gap-3 mb-3">
-          {days.map((label) => (
-            <div key={label} className="text-center text-sm" style={{ color: '#64748b' }}>
-              {label}
-            </div>
-          ))}
-        </div>
-
-        <div className="space-y-3">
-          {weeks.map((week, rowIdx) => (
-            <div key={rowIdx} className="grid grid-cols-7 gap-3">
-              {week.map((day) => {
-                const active = day === reviewReminderDay
-                return (
-                  <button
-                    key={day}
-                    type="button"
-                    onClick={() => onSelectDay(day)}
-                    className="aspect-square rounded-2xl text-xl font-medium transition-all duration-200"
-                    style={{
-                      color: active ? '#ffffff' : '#64748b',
-                      background: active ? 'linear-gradient(135deg, #c8a138, #e0c45b)' : 'transparent',
-                      boxShadow: active ? '0 10px 22px rgba(201,161,62,0.28)' : 'none',
-                      transform: active ? 'translateY(-1px)' : 'none',
-                    }}
-                  >
-                    {day}
-                  </button>
-                )
-              })}
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="mt-8 flex flex-col gap-3 md:flex-row md:items-center">
-        <button
-          type="button"
-          onClick={onSave}
-          disabled={isSaving}
-          className="flex-1 rounded-2xl px-6 py-4 text-lg font-semibold transition-all disabled:opacity-60"
-          style={{
-            background: 'linear-gradient(135deg, #c8a138, #e0c45b)',
-            color: '#fff',
-            boxShadow: '0 14px 28px rgba(201,161,62,0.24)',
-          }}
-        >
-          {isSaving
-            ? 'Saving...'
-            : reviewReminderDay
-              ? `Save ${formatOrdinalDay(reviewReminderDay)} schedule`
-              : 'Save schedule'}
-        </button>
-        <button
-          type="button"
-          onClick={() => onSelectDay(null)}
-          className="rounded-2xl border px-5 py-4 text-sm font-medium transition-colors"
-          style={{
-            borderColor: 'rgba(100,116,139,0.2)',
-            color: '#64748b',
-            background: 'rgba(255,255,255,0.55)',
-          }}
-        >
-          Clear
-        </button>
-      </div>
-
-      <div className="mt-4 rounded-2xl px-4 py-3" style={{ background: 'rgba(23,32,58,0.04)' }}>
-        <p className="text-sm font-medium" style={{ color: '#17203a' }}>
-          {reviewReminderDay
-            ? `Your dashboard review reminder is set for the ${formatOrdinalDay(reviewReminderDay)} of each month.`
-            : 'No monthly review reminder is set yet.'}
-        </p>
-      </div>
-    </div>
-  )
-}
-
 function TrendChartContent({ filteredHistory, activeRange, setActiveRange }) {
   return (
     <>
@@ -902,56 +773,24 @@ function WellnessContent({ breakdown, healthStatus, score }) {
   return (
     <>
       <div className="flex items-start justify-between mb-5">
-        <SectionHeader title="Wellness Breakdown" sub="The 10 factors behind your score" />
+        <SectionHeader title="Wellness Breakdown" sub="The 8 factors behind your score" />
         <HealthRing score={score} color={healthStatus.color} size={80} />
       </div>
       <div className="space-y-3">
         {breakdown.map(item => (
           <div key={item.label}>
             <div className="flex items-center justify-between mb-1.5">
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-medium" style={{ color: 'var(--app-text-soft)' }}>{item.label}</span>
-                <span className="relative group/tip cursor-help z-20">
-                  <Info className="h-3.5 w-3.5" style={{ color: 'var(--app-text-muted)', opacity: 0.7 }} />
-                  <div
-                    className="pointer-events-none absolute left-1/2 bottom-full mb-3 -translate-x-1/2 opacity-0 group-hover/tip:opacity-100 transition-opacity w-64 rounded-xl px-3.5 py-3 text-xs shadow-2xl"
-                    style={{
-                      background: 'rgba(0, 0, 0, 0.88)',
-                      border: '1px solid rgba(255, 255, 255, 0.2)',
-                      color: '#e8e8e8',
-                      lineHeight: '1.6',
-                      backdropFilter: 'blur(8px)',
-                      maxHeight: 'none',
-                      zIndex: 9999,
-                    }}
-                  >
-                    {/* Current value */}
-                    <p className="mb-2.5 pb-2.5" style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.15)', color: item.status === 'pass' ? '#22c55e' : item.status === 'neutral' ? '#3b82f6' : '#ef4444', fontWeight: '600', fontSize: '0.8rem' }}>
-                      {item.currentValue}
-                    </p>
-                    {/* Combined description */}
-                    <p className="mb-3" style={{ color: '#d1d5db' }}>
-                      {item.explanation} {item.whyItMatters && `It matters because ${item.whyItMatters.charAt(0).toLowerCase() + item.whyItMatters.slice(1).split('. ')[0]}.`}
-                    </p>
-                    {/* Action if low (only show if applicable) - with visual highlight */}
-                    {item.actionIfLow && (
-                      <div style={{ background: 'rgba(251, 146, 60, 0.15)', border: '1px solid rgba(251, 146, 60, 0.3)', borderRadius: '0.5rem', padding: '0.625rem', marginTop: '0.5rem' }}>
-                        <p style={{ color: '#fbbf24', fontWeight: '600', marginBottom: '0.375rem', fontSize: '0.8rem' }}>💡 Next Step</p>
-                        <p style={{ color: '#fcd34d', fontSize: '0.75rem' }}>{item.actionIfLow}</p>
-                      </div>
-                    )}
-                    <div
-                      className="absolute left-1/2 top-full h-3 w-3 -translate-x-1/2 -translate-y-1/2 rotate-45"
-                      style={{
-                        background: 'rgba(0, 0, 0, 0.88)',
-                        borderRight: '1px solid rgba(255, 255, 255, 0.2)',
-                        borderBottom: '1px solid rgba(255, 255, 255, 0.2)',
-                      }}
-                    />
-                  </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-sm" style={{ color: 'var(--app-text-soft)' }}>{item.label}</span>
+                <span className="relative group/tip cursor-help">
+                  <Info className="h-3 w-3" style={{ color: 'var(--app-text-muted)', opacity: 0.5 }} />
+                  <span className="pointer-events-none absolute left-5 top-1/2 -translate-y-1/2 z-50 opacity-0 group-hover/tip:opacity-100 transition-opacity w-44 rounded-xl px-2.5 py-1.5 text-[11px] leading-snug shadow-xl"
+                    style={{ background: 'var(--app-surface-strong)', border: '1px solid var(--app-border)', color: 'var(--app-text-soft)' }}>
+                    {item.detail}
+                  </span>
                 </span>
               </div>
-              <span className={`text-xs font-semibold px-2.5 py-0.5 rounded-full ${item.status === 'pass' ? 'bg-emerald-400/10 text-emerald-400' : item.status === 'neutral' ? 'bg-blue-400/10 text-blue-400' : 'bg-red-400/10 text-red-400'}`}>
+              <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${item.status === 'pass' ? 'bg-emerald-400/10 text-emerald-400' : item.status === 'neutral' ? 'bg-blue-400/10 text-blue-400' : 'bg-red-400/10 text-red-400'}`}>
                 {item.score}/{item.max}
               </span>
             </div>
@@ -1026,6 +865,111 @@ const CATEGORY_ICONS = {
 }
 
 // ── Advisor Panel ─────────────────────────────────────────────
+function AdvisorPanel({ assets, summary, breakdown, score, totalNetWorth, pieData, insights }) {
+  const { color: healthColor, label: healthLabel } = useMemo(() => {
+    if (score >= 80) return { color: '#18a871', label: 'Excellent' }
+    if (score >= 65) return { color: '#2f7cf6', label: 'Good' }
+    if (score >= 45) return { color: '#f59e0b', label: 'Fair' }
+    return { color: '#e65054', label: 'At Risk' }
+  }, [score])
+
+  // Liquidity ratio
+  const liquidCategories = new Set(['CASH', 'STOCKS', 'CRYPTO'])
+  const liquidValue = assets.filter(a => liquidCategories.has(a.category)).reduce((s, a) => s + a.value, 0)
+  const liquidPct = totalNetWorth > 0 ? ((liquidValue / totalNetWorth) * 100).toFixed(1) : '0.0'
+
+  // Concentration (largest single category %)
+  const maxCat = pieData.length > 0 ? pieData[0] : null
+  const maxCatPct = maxCat && totalNetWorth > 0 ? ((maxCat.value / totalNetWorth) * 100).toFixed(1) : '0.0'
+
+  // CPF breakdown
+  const cpfAssets = assets.filter(a => a.category === 'CPF')
+  const cpfTotal = cpfAssets.reduce((s, a) => s + a.value, 0)
+
+  // Issues from insights
+  const warnings = insights.highlights.filter(i => i.type === 'warning')
+  const positives = insights.highlights.filter(i => i.type === 'positive')
+
+  const advisorNotes = [
+    maxCatPct > 45 ? `Concentration risk: ${maxCat?.name} is ${maxCatPct}% of portfolio — consider rebalancing` : null,
+    liquidPct < 20 ? `Liquidity gap: only ${liquidPct}% in liquid assets — recommend increasing cash buffer` : null,
+    cpfTotal > 0 ? `CPF holdings: SGD ${cpfTotal.toLocaleString()} — review OA/SA/MA allocation for retirement readiness` : null,
+    score < 50 ? `Health score ${score}/100 — client needs immediate attention across multiple dimensions` : null,
+    score >= 80 ? `Portfolio is well-structured with ${healthLabel.toLowerCase()} health — focus on growth optimization` : null,
+  ].filter(Boolean)
+
+  return (
+    <div className="space-y-5">
+      {/* Risk Flags */}
+      <div className="glass-card p-6">
+        <div className="flex items-center justify-between mb-5">
+          <SectionHeader title="Advisor Dashboard" sub="Deep analytics · risk flags · discussion points" />
+          <div className="flex items-center gap-2">
+            <HealthRing score={score} color={healthColor} size={72} />
+            <div className="text-right">
+              <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: healthColor }}>{healthLabel}</p>
+              <p className="text-[11px] mt-0.5" style={{ color: 'var(--app-text-muted)' }}>Wellness score</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-3 gap-4 mb-5">
+          {[
+            { label: 'Liquidity Ratio', value: `${liquidPct}%`, ok: parseFloat(liquidPct) >= 20, hint: '≥ 20% target' },
+            { label: 'Max Concentration', value: `${maxCatPct}%`, ok: parseFloat(maxCatPct) <= 45, hint: maxCat?.name || '—' },
+            { label: 'CPF Holdings', value: cpfTotal > 0 ? `SGD ${Math.round(cpfTotal / 1000)}K` : 'None', ok: true, hint: 'Retirement account' },
+          ].map(({ label, value, ok, hint }) => (
+            <div key={label} className="rounded-2xl border px-4 py-3" style={{ borderColor: ok ? 'rgba(24,168,113,0.2)' : 'rgba(230,80,84,0.25)', background: ok ? 'rgba(24,168,113,0.04)' : 'rgba(230,80,84,0.04)' }}>
+              <p className="text-[11px] font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--app-text-muted)' }}>{label}</p>
+              <p className="text-xl font-semibold" style={{ color: ok ? '#18a871' : '#e65054' }}>{value}</p>
+              <p className="text-[11px] mt-0.5" style={{ color: 'var(--app-text-muted)' }}>{hint}</p>
+            </div>
+          ))}
+        </div>
+
+        {/* 8-factor detail */}
+        <div className="grid grid-cols-2 gap-3">
+          {breakdown.map(item => (
+            <div key={item.label} className="rounded-xl px-3 py-2.5" style={{ background: 'rgba(255,255,255,0.03)' }}>
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-xs font-medium" style={{ color: 'var(--app-text-soft)' }}>{item.label}</span>
+                <span className={`text-xs font-semibold px-1.5 py-0.5 rounded-full ${item.status === 'pass' ? 'bg-emerald-400/10 text-emerald-400' : item.status === 'neutral' ? 'bg-blue-400/10 text-blue-400' : 'bg-red-400/10 text-red-400'}`}>
+                  {item.score}/{item.max}
+                </span>
+              </div>
+              <div className="h-1 rounded-full bg-white/[0.06] overflow-hidden">
+                <div className="h-full rounded-full" style={{ width: `${(item.score / item.max) * 100}%`, backgroundColor: item.status === 'pass' ? '#18a871' : item.status === 'neutral' ? '#2f7cf6' : '#e65054' }} />
+              </div>
+              <p className="text-[10px] mt-1" style={{ color: 'var(--app-text-muted)' }}>{item.detail}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Advisor Notes */}
+      {advisorNotes.length > 0 && (
+        <div className="glass-card p-6">
+          <SectionHeader title="Advisor Notes" sub="Discussion points and action items for this client" />
+          <div className="mt-4 space-y-2">
+            {advisorNotes.map((note, i) => (
+              <div key={i} className="flex items-start gap-3 rounded-xl border border-yellow-400/15 bg-yellow-400/[0.04] px-3.5 py-3">
+                <AlertTriangle className="h-4 w-4 text-yellow-400 flex-shrink-0 mt-0.5" />
+                <p className="text-sm" style={{ color: 'var(--app-text-soft)' }}>{note}</p>
+              </div>
+            ))}
+            {positives.slice(0, 2).map((insight) => (
+              <div key={insight.title} className="flex items-start gap-3 rounded-xl border border-emerald-400/15 bg-emerald-400/[0.04] px-3.5 py-3">
+                <CheckCircle className="h-4 w-4 text-emerald-400 flex-shrink-0 mt-0.5" />
+                <p className="text-sm" style={{ color: 'var(--app-text-soft)' }}>{insight.title} — {insight.message}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function KpiCard({ label, value, sub, positive, valueClass, glow, scoreColor, icon }) {
   const isNeutral = positive === undefined && !scoreColor
   return (

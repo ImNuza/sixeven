@@ -1,4 +1,4 @@
-import { WELLNESS_THRESHOLDS, ASSET_CATEGORIES, TARGET_ALLOCATION, isStablecoin, parseMonthlyExpenses, getRiskAdjustedThresholds } from './constants.js'
+import { WELLNESS_THRESHOLDS, ASSET_CATEGORIES, TARGET_ALLOCATION, isStablecoin } from './constants.js'
 
 function round(value, digits = 1) {
   return Number(value.toFixed(digits))
@@ -11,7 +11,7 @@ export function groupAssetsByCategory(assets) {
   }, {})
 }
 
-export function buildPortfolioInsights(assets, summary, prices = [], userProfile = null) {
+export function buildPortfolioInsights(assets, summary, prices = []) {
   if (!assets.length) {
     return {
       highlights: [],
@@ -21,12 +21,6 @@ export function buildPortfolioInsights(assets, summary, prices = [], userProfile
       priceStatus: 'No live price data available yet.',
     }
   }
-
-  const T = userProfile?.riskAppetite
-    ? getRiskAdjustedThresholds(userProfile.riskAppetite)
-    : WELLNESS_THRESHOLDS
-  const monthlyExpenses = parseMonthlyExpenses(userProfile?.monthlyExpensesRange) ?? T.MONTHLY_EXPENSES
-  const financialGoals = userProfile?.financialGoals || []
 
   const totalValue = summary?.totalNetWorth || assets.reduce((sum, asset) => sum + asset.value, 0)
   const byCategory = groupAssetsByCategory(assets)
@@ -42,7 +36,7 @@ export function buildPortfolioInsights(assets, summary, prices = [], userProfile
     .reduce((sum, a) => sum + a.value, 0)
   const volatileCryptoValue = (byCategory.CRYPTO || 0) - stablecoinValue
   const cryptoPct = totalValue > 0 ? volatileCryptoValue / totalValue : 0
-  const cashMonths = ((byCategory.CASH || 0) + stablecoinValue) / monthlyExpenses
+  const cashMonths = ((byCategory.CASH || 0) + stablecoinValue) / WELLNESS_THRESHOLDS.MONTHLY_EXPENSES
 
   const assetMoves = assets
     .map((asset) => {
@@ -64,36 +58,36 @@ export function buildPortfolioInsights(assets, summary, prices = [], userProfile
 
   const highlights = [
     {
-      type: largestCategoryPct > T.DIVERSIFICATION_MAX ? 'warning' : 'positive',
-      title: largestCategoryPct > T.DIVERSIFICATION_MAX ? 'Concentration Risk' : 'Well Diversified',
-      message: `${ASSET_CATEGORIES[largestCategory] || largestCategory} is ${round(largestCategoryPct * 100)}% of your portfolio${largestCategoryPct > T.DIVERSIFICATION_MAX ? ` — trim to stay under ${round(T.DIVERSIFICATION_MAX * 100)}%.` : '.'}`,
+      type: largestCategoryPct > WELLNESS_THRESHOLDS.DIVERSIFICATION_MAX ? 'warning' : 'positive',
+      title: largestCategoryPct > WELLNESS_THRESHOLDS.DIVERSIFICATION_MAX ? 'Concentration Risk' : 'Well Diversified',
+      message: `${ASSET_CATEGORIES[largestCategory] || largestCategory} is ${round(largestCategoryPct * 100)}% of your portfolio${largestCategoryPct > WELLNESS_THRESHOLDS.DIVERSIFICATION_MAX ? ' — trim to stay under 40%.' : '.'}`,
     },
     {
-      type: liquidPct >= T.LIQUIDITY_TARGET ? 'positive' : 'warning',
-      title: liquidPct >= T.LIQUIDITY_TARGET ? 'Healthy Liquidity' : 'Low Liquidity',
-      message: `${round(liquidPct * 100)}% liquid${liquidPct < T.LIQUIDITY_TARGET ? ' — raise to 20% for flexibility.' : ' — above the 20% threshold.'}`,
+      type: liquidPct >= WELLNESS_THRESHOLDS.LIQUIDITY_TARGET ? 'positive' : 'warning',
+      title: liquidPct >= WELLNESS_THRESHOLDS.LIQUIDITY_TARGET ? 'Healthy Liquidity' : 'Low Liquidity',
+      message: `${round(liquidPct * 100)}% liquid${liquidPct < WELLNESS_THRESHOLDS.LIQUIDITY_TARGET ? ' — raise to 20% for flexibility.' : ' — above the 20% threshold.'}`,
     },
     {
-      type: cryptoPct > T.CRYPTO_MAX ? 'warning' : 'positive',
-      title: cryptoPct > T.CRYPTO_MAX ? 'High Crypto Risk' : 'Crypto in Range',
-      message: `${round(cryptoPct * 100)}% in crypto${cryptoPct > T.CRYPTO_MAX ? ` — recommended cap is ${round(T.CRYPTO_MAX * 100)}%.` : ' — within the preferred range.'}`,
+      type: cryptoPct > WELLNESS_THRESHOLDS.CRYPTO_MAX ? 'warning' : 'positive',
+      title: cryptoPct > WELLNESS_THRESHOLDS.CRYPTO_MAX ? 'High Crypto Risk' : 'Crypto in Range',
+      message: `${round(cryptoPct * 100)}% in crypto${cryptoPct > WELLNESS_THRESHOLDS.CRYPTO_MAX ? ' — recommended cap is 30%.' : ' — within the preferred range.'}`,
     },
     {
-      type: cashMonths >= T.EMERGENCY_FUND_MONTHS ? 'positive' : 'info',
-      title: cashMonths >= T.EMERGENCY_FUND_MONTHS ? 'Emergency Fund OK' : 'Build Emergency Fund',
-      message: `${round(cashMonths)} months of expenses covered (S$${monthlyExpenses.toLocaleString()}/mo)${cashMonths < T.EMERGENCY_FUND_MONTHS ? ` — target is ${T.EMERGENCY_FUND_MONTHS} months.` : '.'}`,
+      type: cashMonths >= WELLNESS_THRESHOLDS.EMERGENCY_FUND_MONTHS ? 'positive' : 'info',
+      title: cashMonths >= WELLNESS_THRESHOLDS.EMERGENCY_FUND_MONTHS ? 'Emergency Fund OK' : 'Build Emergency Fund',
+      message: `${round(cashMonths)} months of expenses covered${cashMonths < WELLNESS_THRESHOLDS.EMERGENCY_FUND_MONTHS ? ` — target is ${WELLNESS_THRESHOLDS.EMERGENCY_FUND_MONTHS} months.` : '.'}`,
     },
   ]
 
   // Concentration risk — single-asset level
   const maxAssetValue = assets.length > 0 ? Math.max(...assets.map((a) => a.value)) : 0
   const maxAssetPct = totalValue > 0 ? maxAssetValue / totalValue : 0
-  if (maxAssetPct > T.SINGLE_ASSET_MAX) {
+  if (maxAssetPct > WELLNESS_THRESHOLDS.SINGLE_ASSET_MAX) {
     const topAsset = assets.reduce((top, a) => a.value > top.value ? a : top, assets[0])
     highlights.push({
       type: 'warning',
       title: 'Single-Asset Risk',
-      message: `"${topAsset.name}" is ${round(maxAssetPct * 100)}% of your portfolio — consider spreading risk below ${round(T.SINGLE_ASSET_MAX * 100)}%.`,
+      message: `"${topAsset.name}" is ${round(maxAssetPct * 100)}% of your portfolio — consider spreading risk below 25%.`,
     })
   }
 
@@ -102,40 +96,12 @@ export function buildPortfolioInsights(assets, summary, prices = [], userProfile
     const actual = totalValue > 0 ? (byCategory[cat] || 0) / totalValue : 0
     return Math.max(max, Math.abs(actual - target))
   }, 0)
-  if (maxDrift > T.REBALANCING_DRIFT_MAX) {
+  if (maxDrift > WELLNESS_THRESHOLDS.REBALANCING_DRIFT_MAX) {
     highlights.push({
       type: 'info',
       title: 'Rebalancing Needed',
       message: `Portfolio has drifted ${round(maxDrift * 100)}% from target allocation — review your balance.`,
     })
-  }
-
-  // Goal-specific highlights
-  if (financialGoals.includes('Save for retirement') && !(byCategory.CPF > 0)) {
-    highlights.push({
-      type: 'info',
-      title: 'Retirement Planning',
-      message: 'Your goal is retirement savings — consider CPF top-ups or a retirement-focused portfolio.',
-    })
-  }
-  if (financialGoals.includes('Buy a home') && !(byCategory.PROPERTY > 0)) {
-    highlights.push({
-      type: 'info',
-      title: 'Home Purchase Goal',
-      message: 'You\'re saving to buy a home — keep liquidity high and consider a dedicated savings bucket.',
-    })
-  }
-  if (financialGoals.includes('Generate passive income')) {
-    const incomeAssetPct = totalValue > 0
-      ? (['BONDS', 'CPF'].reduce((s, c) => s + (byCategory[c] || 0), 0) / totalValue)
-      : 0
-    if (incomeAssetPct < 0.2) {
-      highlights.push({
-        type: 'info',
-        title: 'Passive Income Gap',
-        message: `Only ${round(incomeAssetPct * 100)}% in income assets — add dividend stocks, bonds, or REITs.`,
-      })
-    }
   }
 
   const metrics = [

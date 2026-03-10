@@ -124,6 +124,7 @@ const STEPS = [
   'investments',
   'property',
   'debts',
+  'banking',
   'wallets',
   'integrations',
   'consent',
@@ -328,7 +329,7 @@ async function persistPortfolioAssets(values, propertyLookup) {
       details: {
         address: propertyLookup?.address || 'Property',
         remainingLoan: parseAmount(values.mortgageOutstanding),
-        postalCode: values.propertyPostcode.trim(),
+        postcode: values.propertyPostcode.trim(),
         latestHdbResalePrice: propertyLookup?.hdb?.latestResalePrice || null,
       },
     } : null,
@@ -903,6 +904,49 @@ export default function Onboarding() {
             </div>
           </StepShell>
         )
+      case 'banking':
+        return (
+          <StepShell
+            step={stepIndex}
+            total={totalProgressSteps}
+            title="Would you like to add your bank balances now?"
+            description="You can connect OCBC, enter balances manually, or skip this step for now."
+          >
+            <div style={{ display: 'grid', gap: '0.8rem' }}>
+              {['Connect OCBC', 'Enter balances manually', 'Skip for now'].map((option) => {
+                const active = values.bankLinkMode === option
+                return (
+                  <button
+                    key={option}
+                    type="button"
+                    onClick={() => setField('bankLinkMode', option)}
+                    style={{
+                      ...buttonStyle(false),
+                      justifyContent: 'flex-start',
+                      color: active ? '#fff' : 'rgba(255,255,255,0.72)',
+                      borderColor: active ? `${GOLD}80` : 'rgba(255,255,255,0.12)',
+                      background: active ? 'rgba(201,168,76,0.14)' : 'transparent',
+                    }}
+                  >
+                    {option}
+                  </button>
+                )
+              })}
+            </div>
+            {values.bankLinkMode === 'Connect OCBC' && (
+              <div style={{ marginTop: '1rem', display: 'grid', gap: '0.8rem' }}>
+                <button type="button" onClick={handleConnectOcbc} disabled={integrationState.ocbcConnecting || integrationState.ocbcConnected} style={buttonStyle(true)}>
+                  {integrationState.ocbcConnecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Landmark className="h-4 w-4" />}
+                  {integrationState.ocbcConnected ? 'OCBC connected' : 'Connect OCBC'}
+                </button>
+                {integrationState.ocbcError && <p style={{ color: '#fca5a5', fontSize: '0.9rem' }}>{integrationState.ocbcError}</p>}
+              </div>
+            )}
+            {values.bankLinkMode === 'Enter balances manually' && (
+              <input type="number" value={values.manualBankBalance} onChange={(event) => setField('manualBankBalance', event.target.value)} placeholder="Manual bank balance (SGD)" style={{ ...inputStyle(), marginTop: '1rem' }} />
+            )}
+          </StepShell>
+        )
       case 'wallets':
         return (
           <StepShell step={stepIndex} total={totalProgressSteps} title="Would you like to specify your wallet addresses?" description="Paste one or more EVM wallet addresses. We will save valid addresses and show them in your dashboard and connected accounts.">
@@ -921,7 +965,7 @@ export default function Onboarding() {
         )
       case 'integrations':
         return (
-          <StepShell step={stepIndex} total={totalProgressSteps} title="Optional account connections and imports" description="You can connect Singpass and link your accounts now, or do it later from Account.">
+          <StepShell step={stepIndex} total={totalProgressSteps} title="Optional account connections and imports" description="You can connect Singpass and choose demo accounts now, or do it later from Account.">
             <div style={{ display: 'grid', gap: '1rem' }}>
               <div style={{ border: '1px solid rgba(255,255,255,0.1)', borderRadius: '1rem', padding: '1rem', background: 'rgba(255,255,255,0.03)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', marginBottom: '0.8rem' }}>
@@ -939,69 +983,45 @@ export default function Onboarding() {
               <div style={{ border: '1px solid rgba(255,255,255,0.1)', borderRadius: '1rem', padding: '1rem', background: 'rgba(255,255,255,0.03)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', marginBottom: '0.8rem' }}>
                   <LineChart className="h-4 w-4" style={{ color: '#ff7a00' }} />
-                  <strong>moomoo SG Account</strong>
+                  <strong>moomoo positions</strong>
                 </div>
-                <p style={{ color: 'rgba(255,255,255,0.52)', marginBottom: '0.8rem' }}>
-                  Link your moomoo account to import your stock and fund holdings directly.
-                </p>
-                <button 
-                  type="button" 
-                  onClick={() => setField('useDemoMoomoo', !values.useDemoMoomoo)}
-                  style={{
-                    ...buttonStyle(values.useDemoMoomoo ? true : false),
-                    width: '100%',
-                    justifyContent: 'center',
-                  }}
-                >
-                  {values.useDemoMoomoo ? (
-                    <>
-                      <CheckCircle2 className="h-4 w-4" style={{ color: '#86efac' }} />
-                      Account connected
-                    </>
-                  ) : (
-                    <>
-                      <Building2 className="h-4 w-4" />
-                      Connect moomoo
-                    </>
-                  )}
-                </button>
-                {values.useDemoMoomoo && (
-                  <p style={{ color: '#86efac', marginTop: '0.6rem', fontSize: '0.875rem' }}>✓ moomoo SG account linked and ready to sync</p>
+                <input value={values.moomooOpenDUrl} onChange={(event) => setField('moomooOpenDUrl', event.target.value)} placeholder="OpenD URL (e.g. http://127.0.0.1:33333)" style={{ ...inputStyle(), marginBottom: '0.8rem' }} />
+                <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                  <button type="button" onClick={handleImportMoomoo} disabled={integrationState.moomooLoading} style={buttonStyle(false)}>
+                    {integrationState.moomooLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Building2 className="h-4 w-4" />}
+                    Import via OpenD
+                  </button>
+                </div>
+                {integrationState.moomooImported && (
+                  <p style={{ color: '#86efac', marginTop: '0.6rem' }}>moomoo portfolio imported{integrationState.moomooAccountId ? ` (${integrationState.moomooAccountId})` : ''}.</p>
                 )}
+                {integrationState.moomooError && <p style={{ color: '#fca5a5', marginTop: '0.6rem' }}>{integrationState.moomooError}</p>}
               </div>
 
               <div style={{ border: '1px solid rgba(255,255,255,0.1)', borderRadius: '1rem', padding: '1rem', background: 'rgba(255,255,255,0.03)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', marginBottom: '0.8rem' }}>
-                  <WalletCards className="h-4 w-4" style={{ color: '#a78bfa' }} />
-                  <strong>Crypto Wallet</strong>
+                  <CheckCircle2 className="h-4 w-4" style={{ color: '#86efac' }} />
+                  <strong>Demo accounts (optional)</strong>
                 </div>
                 <p style={{ color: 'rgba(255,255,255,0.52)', marginBottom: '0.8rem' }}>
-                  Link your wallet to track your cryptocurrency holdings across blockchains.
+                  Select demo account sources to auto-link when onboarding completes.
                 </p>
-                <button 
-                  type="button" 
-                  onClick={() => setField('useDemoCryptoWallet', !values.useDemoCryptoWallet)}
-                  style={{
-                    ...buttonStyle(values.useDemoCryptoWallet ? true : false),
-                    width: '100%',
-                    justifyContent: 'center',
-                  }}
-                >
-                  {values.useDemoCryptoWallet ? (
-                    <>
-                      <CheckCircle2 className="h-4 w-4" style={{ color: '#86efac' }} />
-                      Wallet connected
-                    </>
-                  ) : (
-                    <>
-                      <WalletCards className="h-4 w-4" />
-                      Connect wallet
-                    </>
-                  )}
-                </button>
-                {values.useDemoCryptoWallet && (
-                  <p style={{ color: '#86efac', marginTop: '0.6rem', fontSize: '0.875rem' }}>✓ Crypto wallet linked and ready to sync</p>
-                )}
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.7rem', marginBottom: '0.6rem', color: 'rgba(255,255,255,0.8)' }}>
+                  <input
+                    type="checkbox"
+                    checked={values.useDemoMoomoo}
+                    onChange={(event) => setField('useDemoMoomoo', event.target.checked)}
+                  />
+                  Demo moomoo SG account
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.7rem', color: 'rgba(255,255,255,0.8)' }}>
+                  <input
+                    type="checkbox"
+                    checked={values.useDemoCryptoWallet}
+                    onChange={(event) => setField('useDemoCryptoWallet', event.target.checked)}
+                  />
+                  Demo crypto wallet
+                </label>
               </div>
             </div>
           </StepShell>
@@ -1009,25 +1029,10 @@ export default function Onboarding() {
       case 'consent':
         return (
           <StepShell step={stepIndex} total={totalProgressSteps} title="Before we build your profile, please confirm the following" description="By proceeding, you agree to the Terms of Service and Privacy Policy, and you understand the app provides general guidance rather than licensed financial advice.">
-            <div style={{ marginBottom: '1rem' }}>
-              <a 
-                href="/terms-and-conditions.pdf" 
-                target="_blank" 
-                rel="noopener noreferrer"
-                style={{
-                  color: GOLD,
-                  textDecoration: 'underline',
-                  cursor: 'pointer',
-                  fontSize: '0.9rem'
-                }}
-              >
-                📄 View Full Terms and Conditions
-              </a>
-            </div>
             <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.85rem', padding: '1rem 1.1rem', borderRadius: '1rem', border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.04)' }}>
               <input type="checkbox" checked={values.termsAccepted} onChange={(event) => setField('termsAccepted', event.target.checked)} style={{ marginTop: '0.2rem' }} />
               <span style={{ color: 'rgba(255,255,255,0.72)', lineHeight: 1.6 }}>
-                I understand and agree to the Terms and Conditions. I also confirm I have not entered sensitive information such as account passwords, NRIC numbers, or bank card details.
+                I understand and agree. I also confirm I have not entered sensitive information such as account passwords, NRIC numbers, or bank card details.
               </span>
             </label>
           </StepShell>

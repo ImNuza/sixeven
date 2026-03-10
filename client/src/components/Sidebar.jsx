@@ -1,12 +1,14 @@
+import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
-import { LayoutDashboard, Wallet, Lightbulb, Shield, LogOut, ChevronLeft, ChevronRight } from 'lucide-react'
+import { LayoutDashboard, Wallet, Lightbulb, Shield, LogOut, Calculator, ChevronLeft, ChevronRight } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext.jsx'
 import { useSidebar } from '../context/SidebarContext.jsx'
+import CalculatorModal from './Calculator.jsx'
 
 const navItems = [
   { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/assets',    icon: Wallet,          label: 'Assets' },
-  { to: '/insights',  icon: Lightbulb,       label: 'Financial Insights' },
+  { to: '/insights',  icon: Lightbulb,       label: 'Insights' },
 ]
 
 function initialsFor(username) {
@@ -39,6 +41,7 @@ function Tip({ label, collapsed, children }) {
 export default function Sidebar() {
   const { user, logout } = useAuth()
   const { collapsed, toggle } = useSidebar()
+  const [showCalc, setShowCalc] = useState(false)
 
   const w = collapsed ? 'w-[68px]' : 'w-64'
 
@@ -102,6 +105,19 @@ export default function Sidebar() {
             </NavLink>
           </Tip>
         ))}
+
+        <Tip label="Add Asset" collapsed={collapsed}>
+          <button
+            type="button"
+            onClick={() => setShowCalc(true)}
+            className={`flex w-full items-center rounded-2xl py-3 text-sm font-medium text-white/50 hover:bg-white/[0.04] hover:text-white/80 transition-all duration-200 ${
+              collapsed ? 'justify-center px-0' : 'gap-3 px-4'
+            }`}
+          >
+            <Calculator className="h-[18px] w-[18px] flex-shrink-0" />
+            {!collapsed && 'Add Asset'}
+          </button>
+        </Tip>
       </nav>
 
       {/* ── Footer ──────────────────────────────────────────── */}
@@ -142,6 +158,7 @@ export default function Sidebar() {
         </Tip>
       </div>
 
+      {showCalc && <CalculatorModal onClose={() => setShowCalc(false)} />}
     </aside>
   )
 }
