@@ -8,7 +8,6 @@ function sanitizeUser(user) {
     id: Number(user.id),
     username: user.username,
     email: rawEmail || null,
-    reviewReminderDay: user.review_reminder_day == null ? null : Number(user.review_reminder_day),
     createdAt: user.created_at,
   }
 }
@@ -92,7 +91,7 @@ export async function createUserAccount(pool, { username, password, email }) {
     const { rows } = await client.query(
       `INSERT INTO users (username, email, email_hmac, password_hash)
        VALUES ($1, $2, $3, $4)
-       RETURNING id, username, email, review_reminder_day, created_at`,
+       RETURNING id, username, email, created_at`,
       [trimmedUsername, encryptedEmail, emailHmac, passwordHash]
     )
 
@@ -113,7 +112,7 @@ export async function createUserAccount(pool, { username, password, email }) {
 
 export async function authenticateAccount(pool, { username, password }) {
   const { rows } = await pool.query(
-    'SELECT id, username, email, review_reminder_day, created_at, password_hash FROM users WHERE username = $1',
+    'SELECT id, username, email, created_at, password_hash FROM users WHERE username = $1',
     [String(username || '').trim()]
   )
 
@@ -132,7 +131,7 @@ export async function authenticateAccount(pool, { username, password }) {
 
 export async function getUserById(pool, id) {
   const { rows } = await pool.query(
-    'SELECT id, username, email, review_reminder_day, created_at FROM users WHERE id = $1',
+    'SELECT id, username, email, created_at FROM users WHERE id = $1',
     [id]
   )
 
@@ -186,23 +185,13 @@ export async function deleteAccount(pool, userId, { password }) {
   return { deleted: true }
 }
 
-export async function updateProfile(pool, userId, { email, reviewReminderDay }) {
+export async function updateProfile(pool, userId, { email }) {
   const normalizedEmail = normalizeEmail(email)
   const emailError = validateEmail(normalizedEmail)
   if (emailError) {
     const error = new Error(emailError)
     error.statusCode = 400
     throw error
-  }
-
-  let normalizedReminderDay = null
-  if (reviewReminderDay !== undefined && reviewReminderDay !== null && reviewReminderDay !== '') {
-    normalizedReminderDay = Number(reviewReminderDay)
-    if (!Number.isInteger(normalizedReminderDay) || normalizedReminderDay < 1 || normalizedReminderDay > 28) {
-      const error = new Error('Review reminder day must be between 1 and 28.')
-      error.statusCode = 400
-      throw error
-    }
   }
 
   if (normalizedEmail) {
@@ -222,9 +211,9 @@ export async function updateProfile(pool, userId, { email, reviewReminderDay }) 
   const emailHmac = normalizedEmail ? hmacLookup(normalizedEmail) : null
   const result = await pool.query(
     `UPDATE users
-     SET email = $1, email_hmac = $2, review_reminder_day = $3
-     WHERE id = $4`,
-    [encryptedEmail, emailHmac, normalizedReminderDay, userId]
+     SET email = $1, email_hmac = $2
+     WHERE id = $3`,
+    [encryptedEmail, emailHmac, userId]
   )
 
   if (!result.rowCount) {
