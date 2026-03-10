@@ -58,7 +58,9 @@ function getInitialParams(searchParams) {
     search: searchParams.get('search') || '',
     category: searchParams.get('category') || 'ALL',
     pricing: searchParams.get('pricing') || 'ALL',
-    sortBy: searchParams.get('sortBy') || 'value',
+    dateFrom: searchParams.get('dateFrom') || '',
+    dateTo: searchParams.get('dateTo') || '',
+    sortBy: searchParams.get('sortBy') || 'date',
     sortDirection: searchParams.get('sortDirection') || 'desc',
     page: Number.parseInt(searchParams.get('page') || '1', 10) || 1,
   }
@@ -82,6 +84,8 @@ export default function Assets() {
   const [debouncedSearch, setDebouncedSearch] = useState(initialParams.search)
   const [categoryFilter, setCategoryFilter] = useState(initialParams.category)
   const [pricingFilter, setPricingFilter] = useState(initialParams.pricing)
+  const [dateFrom, setDateFrom] = useState(initialParams.dateFrom)
+  const [dateTo, setDateTo] = useState(initialParams.dateTo)
   const [sortBy, setSortBy] = useState(initialParams.sortBy)
   const [sortDirection, setSortDirection] = useState(initialParams.sortDirection)
   const [page, setPage] = useState(initialParams.page)
@@ -127,13 +131,32 @@ export default function Assets() {
     if (search) p.search = search
     if (categoryFilter !== 'ALL') p.category = categoryFilter
     if (pricingFilter !== 'ALL') p.pricing = pricingFilter
-    if (sortBy !== 'value') p.sortBy = sortBy
+    if (dateFrom) p.dateFrom = dateFrom
+    if (dateTo) p.dateTo = dateTo
+    if (sortBy !== 'date') p.sortBy = sortBy
     if (sortDirection !== 'desc') p.sortDirection = sortDirection
     if (page > 1) p.page = String(page)
     setSearchParams(p, { replace: true })
-  }, [search, categoryFilter, pricingFilter, sortBy, sortDirection, page, setSearchParams])
+  }, [search, categoryFilter, pricingFilter, dateFrom, dateTo, sortBy, sortDirection, page, setSearchParams])
 
-  useEffect(() => { setPage(1) }, [debouncedSearch, categoryFilter, pricingFilter])
+  useEffect(() => { setPage(1) }, [debouncedSearch, categoryFilter, pricingFilter, dateFrom, dateTo])
+
+  // Detect if we're coming from onboarding with refresh flag
+  useEffect(() => {
+    const refreshParam = searchParams.get('refresh')
+    if (refreshParam === 'true') {
+      console.log('[Assets] Detected onboarding refresh flag, clearing cache and reloading')
+      // Remove the refresh parameter from URL
+      const newParams = {}
+      if (search) newParams.search = search
+      if (categoryFilter !== 'ALL') newParams.category = categoryFilter
+      if (pricingFilter !== 'ALL') newParams.pricing = pricingFilter
+      if (sortBy !== 'date') newParams.sortBy = sortBy
+      if (sortDirection !== 'desc') newParams.sortDirection = sortDirection
+      if (page > 1) newParams.page = String(page)
+      setSearchParams(newParams, { replace: true })
+    }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -142,17 +165,23 @@ export default function Assets() {
       try {
         if (showSpinner) setLoading(true)
         setError('')
+        console.log('[Assets] Loading assets...', { page, pageSize: pagination.pageSize, search: debouncedSearch, category: categoryFilter })
         const [assetResult, priceRows] = await Promise.all([
-          fetchAssetsPage({ page, pageSize: pagination.pageSize, search: debouncedSearch, category: categoryFilter, pricing: pricingFilter, sortBy, sortDirection }),
+          fetchAssetsPage({ page, pageSize: pagination.pageSize, search: debouncedSearch, category: categoryFilter, pricing: pricingFilter, dateFrom, dateTo, sortBy, sortDirection }),
           fetchPrices(),
         ])
         if (cancelled) return
+        console.log('[Assets] ✓ Loaded', assetResult.items.length, 'assets')
+        assetResult.items.forEach(a => {
+          console.log('[Assets]   -', a.name, '(' + a.category + '):', '$' + a.value)
+        })
         setAssets(assetResult.items)
         setPagination(assetResult.pagination)
         if (assetResult.pagination.totalPages > 0 && page > assetResult.pagination.totalPages)
           setPage(assetResult.pagination.totalPages)
         setPrices(priceRows)
       } catch (err) {
+        console.error('[Assets] ✗ Failed to load assets:', err.message)
         if (!cancelled) setError(err.message || 'Failed to load assets.')
       } finally {
         if (!cancelled && showSpinner) setLoading(false)
@@ -162,7 +191,7 @@ export default function Assets() {
     loadAssets()
     const id = window.setInterval(() => loadAssets(false), 60000)
     return () => { cancelled = true; window.clearInterval(id) }
-  }, [page, debouncedSearch, categoryFilter, pricingFilter, sortBy, sortDirection, pagination.pageSize])
+  }, [page, debouncedSearch, categoryFilter, pricingFilter, dateFrom, dateTo, sortBy, sortDirection, pagination.pageSize])
 
   const stats = useMemo(() => {
     const liveTracked = assets.filter(a => a.ticker && a.quantity != null).length
@@ -175,7 +204,7 @@ export default function Assets() {
 
   async function reloadCurrentPage() {
     const [assetResult, priceRows] = await Promise.all([
-      fetchAssetsPage({ page, pageSize: pagination.pageSize, search: debouncedSearch, category: categoryFilter, pricing: pricingFilter, sortBy, sortDirection }),
+      fetchAssetsPage({ page, pageSize: pagination.pageSize, search: debouncedSearch, category: categoryFilter, pricing: pricingFilter, dateFrom, dateTo, sortBy, sortDirection }),
       fetchPrices(),
     ])
     setAssets(assetResult.items)
@@ -321,7 +350,7 @@ export default function Assets() {
 
       {/* Filters */}
       <div className="glass-card p-4">
-        <div className="grid grid-cols-[1.6fr_0.9fr_0.9fr_auto] gap-4">
+        <div className="grid grid-cols-[1.6fr_0.85fr_0.85fr_0.75fr_0.75fr_auto] gap-3">
           <label className="relative block">
             <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2" style={{ color: 'var(--app-text-muted)' }} />
             <input
@@ -340,10 +369,26 @@ export default function Assets() {
             <option value="LIVE">Live-priced</option>
             <option value="MANUAL">Manual-valued</option>
           </select>
+          <input
+            type="date"
+            value={dateFrom}
+            onChange={e => setDateFrom(e.target.value)}
+            placeholder="From date"
+            className="app-input"
+            title="Filter assets acquired from this date"
+          />
+          <input
+            type="date"
+            value={dateTo}
+            onChange={e => setDateTo(e.target.value)}
+            placeholder="To date"
+            className="app-input"
+            title="Filter assets acquired until this date"
+          />
           <button
             type="button"
             onClick={handleExport}
-            className="inline-flex items-center gap-2 rounded-xl border px-4 py-3 text-sm font-medium transition hover:bg-white/[0.07]"
+            className="inline-flex items-center gap-2 rounded-xl border px-4 py-3 text-sm font-medium transition hover:bg-white/[0.07] whitespace-nowrap"
             style={{ borderColor: 'var(--app-border)', background: 'var(--app-surface)', color: 'var(--app-text-soft)' }}
           >
             <Download className="h-4 w-4" />
@@ -386,7 +431,7 @@ export default function Assets() {
       <div className="glass-card overflow-hidden">
         <div
           className="grid gap-4 border-b px-6 py-4 text-xs uppercase tracking-[0.18em]"
-          style={{ gridTemplateColumns: '36px 2fr 1fr 1fr 1fr 1fr 1fr', borderColor: 'var(--app-border)', color: 'var(--app-text-muted)' }}
+          style={{ gridTemplateColumns: '36px 2fr 1fr 1fr 1fr 1fr 0.9fr 1fr', borderColor: 'var(--app-border)', color: 'var(--app-text-muted)' }}
         >
           {/* Select all checkbox */}
           <button type="button" onClick={toggleSelectAll} className="flex items-center justify-center">
@@ -400,6 +445,7 @@ export default function Assets() {
           <SortHeader label="Value"    active={sortBy === 'value'}    direction={sortDirection} onClick={() => toggleSort('value')} />
           <SortHeader label="Cost"     active={sortBy === 'cost'}     direction={sortDirection} onClick={() => toggleSort('cost')} />
           <SortHeader label="P&L"      active={sortBy === 'pnl'}      direction={sortDirection} onClick={() => toggleSort('pnl')} />
+          <SortHeader label="Date"     active={sortBy === 'date'}     direction={sortDirection} onClick={() => toggleSort('date')} />
           <span>Actions</span>
         </div>
 
@@ -415,7 +461,7 @@ export default function Assets() {
                 key={asset.id}
                 className="grid gap-4 px-6 py-5 text-sm transition-colors"
                 style={{
-                  gridTemplateColumns: '36px 2fr 1fr 1fr 1fr 1fr 1fr',
+                  gridTemplateColumns: '36px 2fr 1fr 1fr 1fr 1fr 0.9fr 1fr',
                   background: isSelected ? 'rgba(47,124,246,0.05)' : undefined,
                 }}
               >
@@ -452,6 +498,10 @@ export default function Assets() {
                 <div className="flex items-center" style={{ color: 'var(--app-text-muted)' }}>{formatCurrency(asset.cost)}</div>
                 <div className={`flex items-center font-medium ${gainLoss >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                   {gainLoss >= 0 ? '+' : ''}{formatCurrency(gainLoss)} ({gainLossPct.toFixed(1)}%)
+                </div>
+
+                <div className="flex items-center" style={{ color: 'var(--app-text-muted)' }}>
+                  {asset.date ? new Date(asset.date).toLocaleDateString('en-SG', { year: 'numeric', month: 'short', day: 'numeric' }) : '–'}
                 </div>
 
                 <div className="flex items-center gap-2">

@@ -7,7 +7,7 @@ import {
 } from 'lucide-react'
 import {
   fetchWalletConnections, saveWalletConnection, deleteWalletConnection, fetchWalletBalances,
-  fetchWalletPortfolio, createAsset,
+  fetchWalletPortfolio, createAsset, lookupExchangeRate,
 } from '../services/api.js'
 import { resolveCoinGeckoId } from '../../../shared/constants.js'
 
@@ -72,6 +72,23 @@ function WalletCard({ connection, onRemove, onRefresh }) {
   const [balances, setBalances] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [usdRate, setUsdRate] = useState(1.35) // Fallback rate
+
+  // Fetch the current USD/SGD rate on mount
+  useEffect(() => {
+    async function fetchRate() {
+      console.log('[WalletPanel] Fetching USD/SGD rate...')
+      try {
+        const rate = await lookupExchangeRate('USD', 'SGD')
+        console.log('[WalletPanel] USD/SGD rate fetched:', rate)
+        setUsdRate(rate)
+      } catch (err) {
+        console.warn('[WalletPanel] Failed to fetch USD/SGD rate:', err)
+        // Keep using fallback 1.35
+      }
+    }
+    fetchRate()
+  }, [])
 
   async function loadBalances() {
     setLoading(true)
@@ -111,7 +128,7 @@ function WalletCard({ connection, onRemove, onRefresh }) {
       category: 'CRYPTO',
       ticker: token.coingeckoId || resolveCoinGeckoId(token.symbol),
       quantity: token.balance,
-      value: token.valueUsd ? Math.round(token.valueUsd * 1.35 * 100) / 100 : 0, // rough USD→SGD
+      value: token.valueUsd ? Math.round(token.valueUsd * usdRate * 100) / 100 : 0,
       cost: 0,
       date: today,
       institution: `${chainLabel} Wallet`,
@@ -133,7 +150,7 @@ function WalletCard({ connection, onRemove, onRefresh }) {
       category: 'CRYPTO',
       ticker: native.coingeckoId || resolveCoinGeckoId(native.symbol),
       quantity: native.balance,
-      value: native.valueUsd ? Math.round(native.valueUsd * 1.35 * 100) / 100 : 0,
+      value: native.valueUsd ? Math.round(native.valueUsd * usdRate * 100) / 100 : 0,
       cost: 0,
       date: today,
       institution: `${CHAIN_LABELS[connection.chain_id] || 'Wallet'} Wallet`,

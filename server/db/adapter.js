@@ -100,6 +100,8 @@ class SQLiteClient {
 
   async query(sql, params = []) {
     const { sql: convertedSql, params: convertedParams } = convertSqlForSqlite(sql, params)
+    // Stringify objects for SQLite TEXT columns
+    const finalParams = convertedParams.map(p => typeof p === 'object' && p !== null ? JSON.stringify(p) : p)
     const trimmedSql = convertedSql.trim().toUpperCase()
     
     try {
@@ -144,12 +146,12 @@ class SQLiteClient {
       // Determine if this is a SELECT or a modifying query
       if (trimmedSql.startsWith('SELECT') || trimmedSql.startsWith('WITH')) {
         const stmt = this.db.prepare(convertedSql)
-        const rows = stmt.all(...convertedParams)
+        const rows = stmt.all(...finalParams)
         return { rows, rowCount: rows.length }
       } else {
         // INSERT, UPDATE, DELETE
         const stmt = this.db.prepare(convertedSql)
-        const info = stmt.run(...convertedParams)
+        const info = stmt.run(...finalParams)
         
         // Handle RETURNING clause for INSERT
         if (trimmedSql.includes('RETURNING')) {

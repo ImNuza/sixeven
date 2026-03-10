@@ -275,6 +275,31 @@ export async function lookupPrice(symbol, type = 'stock') {
   return request(`/api/prices/lookup?symbol=${encodeURIComponent(symbol)}&type=${type}`)
 }
 
+// Fetch FX rate for currency conversion (e.g., USDSGD=X gives USD/SGD rate)
+export async function lookupExchangeRate(from = 'USD', to = 'SGD') {
+  if (from === to) return 1
+  console.log(`[FX] Fetching ${from}/${to} rate from API...`)
+  try {
+    // Use Yahoo Finance ticker format: FROMTO=X
+    const ticker = `${from}${to}=X`
+    console.log(`[FX] Calling lookupPrice with ticker: ${ticker}`)
+    const result = await lookupPrice(ticker, 'stock')
+    console.log(`[FX] API response:`, result)
+    // For forex pairs, the price field contains the actual exchange rate
+    // Always use result.price for forex pairs (FROMTO=X format)
+    const rate = result.price || 1.35
+    console.log(`[FX Rate] ${from}/${to}: ${rate} (from API price field)`, result)
+    return rate
+  } catch (err) {
+    console.warn(`[FX] Failed to fetch ${from}/${to} rate: ${err.message}`)
+    // Fallback hardcoded rates
+    const rates = { SGD: 1, USD: 1.35, GBP: 1.71, EUR: 1.47 }
+    const fallbackRate = rates[from] || 1.35
+    console.log(`[FX] Using fallback rate for ${from}: ${fallbackRate}`)
+    return fallbackRate
+  }
+}
+
 // ── SnapTrade brokerage aggregation ──────────────────────────
 export async function snaptradeRegister() {
   return request('/api/snaptrade/register', { method: 'POST' })

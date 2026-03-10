@@ -1,11 +1,12 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { createPortal } from 'react-dom'
 import {
   X, Wallet, Loader2, AlertCircle, CheckCircle2,
   Building2, TrendingUp, Coins, Banknote, Landmark, Package,
   Search,
 } from 'lucide-react'
-import { createAsset, lookupPrice, lookupPropertyByPostcode } from '../services/api.js'
+import { createAsset, lookupPrice, lookupPropertyByPostcode, lookupExchangeRate } from '../services/api.js'
 
 const today = new Date().toISOString().split('T')[0]
 
@@ -78,11 +79,31 @@ function FetchButton({ onClick, loading, label = 'Fetch Price' }) {
 
 // ── Cash / Bank ──────────────────────────────────────────────
 function CashForm({ state, set }) {
+  const [fetching, setFetching] = useState(false)
   const fx = parseFloat(state.fxRate) || DEFAULT_FX[state.currency] || 1
   const value = (parseFloat(state.balance) || 0) * fx
 
-  function handleCurrencyChange(c) {
+  async function handleCurrencyChange(c) {
     set({ ...state, currency: c, fxRate: String(DEFAULT_FX[c] ?? 1) })
+    
+    if (c === 'SGD') {
+      // SGD to SGD = 1, no conversion needed
+      return
+    }
+    
+    // Fetch real FX rate asynchronously
+    setFetching(true)
+    try {
+      console.log(`[CashForm] Fetching real FX rate for ${c}/SGD...`)
+      const rate = await lookupExchangeRate(c, 'SGD')
+      console.log(`[CashForm] Got rate: ${rate}`)
+      set(current => ({ ...current, fxRate: String(rate) }))
+    } catch (err) {
+      console.warn(`[CashForm] Failed to fetch rate, using fallback:`, err.message)
+      // Keep the fallback rate that was already set
+    } finally {
+      setFetching(false)
+    }
   }
 
   return (
@@ -108,7 +129,7 @@ function CashForm({ state, set }) {
             {CURRENCIES.map(c => <option key={c}>{c}</option>)}
           </Select>
         </Field>
-        <Field label="FX Rate to SGD" hint={state.currency === 'SGD' ? 'No conversion' : ''}>
+        <Field label="FX Rate to SGD" hint={state.currency === 'SGD' ? 'No conversion' : fetching ? 'Fetching...' : ''}>
           <Input type="number" step="0.0001" value={state.fxRate} onChange={v => set({ ...state, fxRate: v })}
             placeholder="1.35" className={state.currency === 'SGD' ? 'opacity-40' : ''} />
         </Field>
@@ -212,6 +233,14 @@ function CPFForm({ state, set }) {
       <p className="text-xs text-white/35 leading-relaxed">
         CPF balances earn guaranteed interest: OA 2.5% p.a., SA & MA 4% p.a. Your CPF is counted as an asset at current balance.
       </p>
+      <Field label="Account Type">
+        <Select value={state.accountType || 'OA'} onChange={v => set({ ...state, accountType: v })}>
+          <option value="OA">Ordinary Account (OA)</option>
+          <option value="SA">Special Account (SA)</option>
+          <option value="MA">Medisave Account (MA)</option>
+          <option value="RA">Retirement Account (RA)</option>
+        </Select>
+      </Field>
       <div className="grid grid-cols-3 gap-4">
         <Field label="Ordinary (OA)">
           <Input type="number" step="0.01" min="0" value={state.oa} onChange={v => set({ ...state, oa: v })} placeholder="0" />
@@ -255,13 +284,188 @@ function PropertyForm({ state, set }) {
   const cpfUsed = parseFloat(state.cpfUsed) || 0
   const equity = Math.max(0, marketVal - loan)
 
+  useEffect(() => {
+    if (!state.postcode?.trim() || !/^\d{6}$/.test(state.postcode)) {
+      setLookupMsg('')
+      return
+    }
+
+    // Debounce property lookup to avoid rate limiting
+    // Triggers on postcode change and updates address for all property types
+    const timer = setTimeout(async () => {
+      setLooking(true)
+      setLookupMsg('')
+      try {
+        const data = await lookupPropertyByPostcode(state.postcode.trim())
+        if (data?.address) {
+          // Update the state with the address
+          const addressStr = [data.block, data.street, data.building].filter(Boolean).join(' ')
+          set(prev => ({ ...prev, address: addressStr || data.address }))
+          
+          let estimatedPrice = null
+          let message = `Found: ${data.address}`
+
+          // Only auto-fill price for HDB Flats
+          if (state.propertyType === 'HDB Flat' && data?.hdb?.comparableSales && state.rooms) {
+            console.log(`[HDB Pricing] Searching for room type: "${state.rooms}"`)
+            console.log(`[HDB Pricing] Available sales:`, data.hdb.comparableSales.map(s => ({ flatType: s.flatType, price: s.resalePrice })))
+            
+            // Extract room number from selection (e.g., "3-room" → "3")
+            const roomCount = state.rooms.split('-')[0].trim()
+            const roomQuery = state.rooms.toUpperCase().replace('-', ' ')
+            
+            // Try multiple matching strategies for flat_type field
+            let matchingComparables = data.hdb.comparableSales.filter(sale => {
+              const saleType = (sale.flatType || '').toUpperCase()
+              // Match "2-room" against "2 ROOM", "2-ROOM", or "2ROOM" formats
+              return saleType.includes(roomQuery) || 
+                     saleType.replace(/-/g, ' ').includes(roomQuery) ||
+                     saleType.replace(/\s+/g, '').includes(roomQuery.replace(/\s+/g, ''))
+            })
+            
+            // If still no matches, try just matching the room count
+            if (matchingComparables.length === 0) {
+              matchingComparables = data.hdb.comparableSales.filter(sale => {
+                const saleType = (sale.flatType || '').toUpperCase()
+                return saleType.startsWith(roomCount + ' ') || 
+                       saleType.startsWith(roomCount + '-') ||
+                       saleType.startsWith(roomCount.trim())
+              })
+            }
+
+            console.log(`[HDB Pricing] Matched ${matchingComparables.length} comparable sales out of ${data.hdb.comparableSales.length}`)
+
+            if (matchingComparables.length > 0) {
+              // Calculate average price for this room type
+              const avgPrice = Math.round(
+                matchingComparables.reduce((sum, sale) => sum + (sale.resalePrice || 0), 0) /
+                matchingComparables.length
+              )
+
+              // Apply floor level adjustment
+              const floorMultipliers = {
+                'Low (1-5)': 0.95,
+                'Mid (6-15)': 1.0,
+                'High (16+)': 1.06,
+              }
+              const floorMult = floorMultipliers[state.floorLevel] || 1.0
+              estimatedPrice = Math.round(avgPrice * floorMult)
+
+              console.log(`[HDB Pricing] Using comparables: avg=${avgPrice}, floorMult=${floorMult}, final=${estimatedPrice}`)
+              message += ` (${state.rooms} ${state.floorLevel} avg from ${matchingComparables.length} sales)`
+            } else if (data?.hdb?.latestResalePrice) {
+              // Fallback: use latest resale price with room+floor-based multipliers  
+              const roomMultipliers = {
+                '1-room': 0.55,
+                '2-room': 0.75,
+                '3-room': 1.0,
+                '4-room': 1.25,
+                '5-room': 1.55,
+                'executive': 1.8,
+              }
+              const floorMultipliers = {
+                'Low (1-5)': 0.95,
+                'Mid (6-15)': 1.0,
+                'High (16+)': 1.06,
+              }
+              const roomMult = roomMultipliers[state.rooms] || 1
+              const floorMult = floorMultipliers[state.floorLevel] || 1.0
+              estimatedPrice = Math.round(data.hdb.latestResalePrice * roomMult * floorMult)
+              
+              console.log(`[HDB Pricing] Using latest price fallback: ${data.hdb.latestResalePrice} * ${roomMult} * ${floorMult} = ${estimatedPrice}`)
+              message += ` (est. ${state.rooms} ${state.floorLevel})`
+            }
+          } 
+          // If no rooms selected but has HDB data, use latest price
+          else if (data?.hdb?.latestResalePrice) {
+            estimatedPrice = data.hdb.latestResalePrice
+            message += ` (HDB latest)`
+          }
+
+          if (estimatedPrice) {
+            set({ ...state, marketValue: String(estimatedPrice) })
+          }
+          setLookupMsg(message)
+        }
+      } catch (err) {
+        setLookupMsg(err.message || 'Unable to fetch property data.')
+      } finally { setLooking(false) }
+    }, 1500) // Increased debounce to avoid rate limiting
+
+    return () => clearTimeout(timer)
+  }, [state.postcode]) // Only depend on postcode to avoid redundant API calls
+
   async function handlePostcodeLookup() {
     if (!state.postcode.trim()) return
     setLooking(true); setLookupMsg('')
     try {
       const data = await lookupPropertyByPostcode(state.postcode.trim())
-      if (data?.address) setLookupMsg(`Found: ${data.address}`)
-      if (data?.estimatedValue) set({ ...state, marketValue: String(data.estimatedValue) })
+      if (data?.address) {
+        // Always update the address for all property types
+        const addressStr = [data.block, data.street, data.building].filter(Boolean).join(' ')
+        set(prev => ({ ...prev, address: addressStr || data.address }))
+        
+        let estimatedPrice = null
+        let message = `Found: ${data.address}`
+
+        // Only auto-fill price for HDB flats
+        if (state.propertyType === 'HDB Flat' && data?.hdb?.comparableSales && state.rooms) {
+          // Convert room selection to match flat_type in data (e.g., "3-room" → "3 ROOM")
+          const roomQuery = state.rooms.toUpperCase().replace('-', ' ')
+          const matchingComparables = data.hdb.comparableSales.filter(sale =>
+            sale.flatType && sale.flatType.toUpperCase().includes(roomQuery)
+          )
+
+          if (matchingComparables.length > 0) {
+            // Calculate average price for this room type
+            let avgPrice = Math.round(
+              matchingComparables.reduce((sum, sale) => sum + (sale.resalePrice || 0), 0) /
+              matchingComparables.length
+            )
+
+            // Apply floor level adjustment
+            const floorMultipliers = {
+              'Low (1-5)': 0.95,
+              'Mid (6-15)': 1.0,
+              'High (16+)': 1.06,
+            }
+            const floorMult = floorMultipliers[state.floorLevel] || 1.0
+            estimatedPrice = Math.round(avgPrice * floorMult)
+
+            message += ` (${state.rooms} ${state.floorLevel} avg from ${matchingComparables.length} sales)`
+          } else if (data?.hdb?.latestResalePrice) {
+            // Fallback: use latest resale price with room+floor-based multipliers  
+            const roomMultipliers = {
+              '1-room': 0.55,
+              '2-room': 0.75,
+              '3-room': 1.0,
+              '4-room': 1.25,
+              '5-room': 1.55,
+              'executive': 1.8,
+            }
+            const floorMultipliers = {
+              'Low (1-5)': 0.95,
+              'Mid (6-15)': 1.0,
+              'High (16+)': 1.06,
+            }
+            const roomMult = roomMultipliers[state.rooms] || 1
+            const floorMult = floorMultipliers[state.floorLevel] || 1.0
+            estimatedPrice = Math.round(data.hdb.latestResalePrice * roomMult * floorMult)
+            message += ` (est. ${state.rooms} ${state.floorLevel})`
+          }
+        } 
+        // If HDB but no rooms selected, use latest price
+        else if (state.propertyType === 'HDB Flat' && data?.hdb?.latestResalePrice) {
+          estimatedPrice = data.hdb.latestResalePrice
+          message += ` (HDB latest)`
+        }
+
+        // Only populate price if HDB type, otherwise user must manually enter
+        if (estimatedPrice) {
+          set(prev => ({ ...prev, marketValue: String(estimatedPrice) }))
+        }
+        setLookupMsg(message)
+      }
     } catch (err) {
       setLookupMsg(err.message || 'Postcode not found.')
     } finally { setLooking(false) }
@@ -277,13 +481,38 @@ function PropertyForm({ state, set }) {
         </Select>
       </Field>
       <div className="grid grid-cols-[1fr_auto] gap-3 items-end">
-        <Field label="Postal Code" hint="Optional — for market reference">
+        <Field label="Postal Code" hint="For address lookup">
           <Input value={state.postcode} onChange={v => set({ ...state, postcode: v })} placeholder="e.g. 520123" />
         </Field>
         <FetchButton onClick={handlePostcodeLookup} loading={looking} label="Lookup" />
       </div>
       {lookupMsg && (
         <p className="text-xs text-white/40 px-1">{lookupMsg}</p>
+      )}
+      {state.propertyType === 'HDB Flat' && (
+        <div className="grid grid-cols-2 gap-4">
+          <Field label="Number of Rooms">
+            <Select value={state.rooms} onChange={v => set({ ...state, rooms: v })}>
+              <option value="">Select...</option>
+              {['1-room', '2-room', '3-room', '4-room', '5-room', '6-room', 'Executive'].map(r => (
+                <option key={r} value={r}>{r}</option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Floor Level">
+            <Select value={state.floorLevel} onChange={v => set({ ...state, floorLevel: v })}>
+              <option value="">Select...</option>
+              {['Low (1-5)', 'Mid (6-15)', 'High (16+)'].map(f => (
+                <option key={f} value={f}>{f}</option>
+              ))}
+            </Select>
+          </Field>
+        </div>
+      )}
+      {state.address && (
+        <Field label="Address">
+          <div className="p-2 text-sm text-white/60 bg-white/5 rounded">{state.address}</div>
+        </Field>
       )}
       <Field label="Estimated Market Value (SGD)">
         <Input type="number" step="1000" min="0" value={state.marketValue} onChange={v => set({ ...state, marketValue: v })} placeholder="e.g. 850000" />
@@ -416,6 +645,7 @@ function PreviewResult({ value, label, positive }) {
 
 // ── Main Modal ───────────────────────────────────────────────
 export default function AddAssetModal({ onClose }) {
+  const navigate = useNavigate()
   const [activeTab, setActiveTab] = useState('stocks')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
@@ -424,8 +654,8 @@ export default function AddAssetModal({ onClose }) {
   // Per-tab form states
   const [cash, setCash] = useState({ institution: '', accountType: 'Savings', balance: '', currency: 'SGD', fxRate: '1' })
   const [stocks, setStocks] = useState({ ticker: '', name: '', quantity: '', priceSgd: '', currency: 'USD', fxRate: '1.35', brokerage: '', purchaseDate: today, costBasis: '' })
-  const [cpf, setCpf] = useState({ oa: '', sa: '', ma: '', monthly: '' })
-  const [property, setProperty] = useState({ propertyType: 'HDB Flat', postcode: '', marketValue: '', outstandingLoan: '', cpfUsed: '' })
+  const [cpf, setCpf] = useState({ accountType: 'OA', oa: '', sa: '', ma: '', monthly: '' })
+  const [property, setProperty] = useState({ propertyType: 'HDB Flat', postcode: '', address: '', marketValue: '', outstandingLoan: '', cpfUsed: '', rooms: '', floorLevel: '' })
   const [crypto, setCrypto] = useState({ symbol: '', quantity: '', priceSgd: '', exchange: '' })
   const [other, setOther] = useState({ name: '', category: 'OTHER', value: '', liquidity: 'Medium', notes: '' })
 
@@ -474,7 +704,7 @@ export default function AddAssetModal({ onClose }) {
           buildPayload: () => ({
             name: 'CPF', category: 'CPF', value, cost: value, date: today,
             institution: 'CPF Board',
-            details: { oa: parseFloat(cpf.oa) || 0, sa: parseFloat(cpf.sa) || 0, ma: parseFloat(cpf.ma) || 0, monthlyContribution: parseFloat(cpf.monthly) || 0 },
+            details: { accountType: cpf.accountType || 'OA', oa: parseFloat(cpf.oa) || 0, sa: parseFloat(cpf.sa) || 0, ma: parseFloat(cpf.ma) || 0, monthlyContribution: parseFloat(cpf.monthly) || 0 },
           }),
         }
       }
@@ -487,7 +717,7 @@ export default function AddAssetModal({ onClose }) {
           buildPayload: () => ({
             name: property.propertyType + (property.postcode ? ` (${property.postcode})` : ''),
             category: 'PROPERTY', value: equity, cost: equity, date: today,
-            details: { propertyType: property.propertyType, marketValue: mkt, outstandingLoan: loan, cpfUsed: parseFloat(property.cpfUsed) || 0, postcode: property.postcode },
+            details: { propertyType: property.propertyType, marketValue: mkt, outstandingLoan: loan, cpfUsed: parseFloat(property.cpfUsed) || 0, postcode: property.postcode, rooms: property.rooms, floorLevel: property.floorLevel },
           }),
         }
       }
@@ -535,7 +765,11 @@ export default function AddAssetModal({ onClose }) {
     try {
       await createAsset(buildPayload())
       setSubmitted(true)
-      setTimeout(onClose, 900)
+      // Navigate to Assets page after successful creation (sorted by date to show new asset at top)
+      setTimeout(() => {
+        onClose()
+        navigate('/assets?sortBy=date&sortDirection=desc')
+      }, 900)
     } catch (err) {
       setSubmitError(err.message || 'Failed to add asset.')
     } finally {

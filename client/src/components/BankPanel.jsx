@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Building2, ChevronDown, ChevronUp, Download, X, Check, Loader2, Landmark, CreditCard, TrendingUp, Trash2, Wifi, RefreshCw } from 'lucide-react'
-import { createAsset, connectOcbc, fetchOcbcAccounts, fetchOcbcStatus, disconnectOcbc, fetchUobAccounts } from '../services/api.js'
+import { createAsset, connectOcbc, fetchOcbcAccounts, fetchOcbcStatus, disconnectOcbc, fetchUobAccounts, lookupExchangeRate } from '../services/api.js'
 
 const BANKS = [
   { id: 'dbs',  name: 'DBS Bank',           country: 'SG', color: '#d3212d', logo: 'D' },
@@ -14,6 +14,9 @@ const BANKS = [
   { id: 'boa',   name: 'Bank of America',    country: 'US',  color: '#e31837', logo: 'B' },
   { id: 'barclays', name: 'Barclays',        country: 'UK',  color: '#00aeef', logo: 'B' },
 ]
+
+// Fallback hardcoded rates (used if API fails)
+const FALLBACK_FX = { SGD: 1, USD: 1.35, GBP: 1.71, EUR: 1.47 }
 
 const MOCK_ACCOUNTS = {
   dbs:     [{ name: 'DBS Multiplier', type: 'depository', subtype: 'savings',    balance: 12450.80, currency: 'SGD', mask: '4821' },
@@ -30,9 +33,6 @@ const MOCK_ACCOUNTS = {
   boa:     [{ name: 'BofA Advantage', type: 'depository', subtype: 'checking', balance: 3100.00, currency: 'USD', mask: '9921' }],
   barclays:[{ name: 'Barclays Current', type: 'depository', subtype: 'checking', balance: 2400.00, currency: 'GBP', mask: '7731' }],
 }
-
-const FX = { SGD: 1, USD: 1.35, GBP: 1.71, EUR: 1.47 }
-const toSGD = (v, c) => v * (FX[c] || 1.35)
 
 const TYPE_ICON = { depository: Landmark, investment: TrendingUp, credit: CreditCard }
 
@@ -180,7 +180,9 @@ function OcbcLivePanel({ onImportDone }) {
     if (importedIds.has(key)) return
     const balance = account.balance?.amount || account.availableBalance?.amount || account.currentBalance || 0
     const currency = account.balance?.currency || account.currency || 'SGD'
-    const sgd = balance * (currency === 'SGD' ? 1 : currency === 'USD' ? 1.35 : 1)
+    // Fetch the real FX rate instead of hardcoding
+    const rate = currency !== 'SGD' ? await lookupExchangeRate(currency, 'SGD') : 1
+    const sgd = balance * rate
     const today = new Date().toISOString().split('T')[0]
     await createAsset({
       name: account.accountName || account.name || `OCBC ${account.accountType || 'Account'}`,
@@ -406,6 +408,27 @@ export default function BankPanel({ onImportDone }) {
   const [showModal, setShowModal] = useState(false)
   const [connections, setConnections] = useState([])
   const [importedIds, setImportedIds] = useState(new Set())
+  const [fxRates, setFxRates] = useState({ USD: FALLBACK_FX.USD, GBP: FALLBACK_FX.GBP, EUR: FALLBACK_FX.EUR })
+
+  // Fetch real FX rates on mount
+  useEffect(() => {
+    async function fetchRates() {
+      console.log('[BankPanel] Fetching real FX rates...')
+      try {
+        const [usdRate, gbpRate, eurRate] = await Promise.all([
+          lookupExchangeRate('USD', 'SGD').catch(() => FALLBACK_FX.USD),
+          lookupExchangeRate('GBP', 'SGD').catch(() => FALLBACK_FX.GBP),
+          lookupExchangeRate('EUR', 'SGD').catch(() => FALLBACK_FX.EUR),
+        ])
+        console.log('[BankPanel] FX rates fetched:', { USD: usdRate, GBP: gbpRate, EUR: eurRate })
+        setFxRates({ USD: usdRate, GBP: gbpRate, EUR: eurRate })
+      } catch (err) {
+        console.warn('[BankPanel] Failed to fetch FX rates:', err)
+        // Use fallback rates
+      }
+    }
+    fetchRates()
+  }, [])
 
   function handleConnected({ bank, accounts }) {
     setConnections(prev => {
@@ -425,7 +448,8 @@ export default function BankPanel({ onImportDone }) {
   async function importAccount(bank, account) {
     const key = `${bank.id}-${account.mask}`
     if (importedIds.has(key)) return
-    const sgd = toSGD(Math.abs(account.balance), account.currency)
+    const rate = fxRates[account.currency] || FALLBACK_FX[account.currency] || 1
+    const sgd = Math.abs(account.balance) * rate
     const today = new Date().toISOString().split('T')[0]
     await createAsset({
       name: account.name,
@@ -529,7 +553,8 @@ export default function BankPanel({ onImportDone }) {
                           const key = `${bank.id}-${a.mask}`
                           const done = importedIds.has(key)
                           const Icon = TYPE_ICON[a.type] || Landmark
-                          const sgd = toSGD(Math.abs(a.balance), a.currency)
+                          const rate = fxRates[a.currency] || FALLBACK_FX[a.currency] || 1
+                          const sgd = Math.abs(a.balance) * rate
                           return (
                             <div key={key} className="flex items-center justify-between py-2.5 border-b border-white/[0.04] last:border-0">
                               <div className="flex items-center gap-3 min-w-0">
