@@ -97,6 +97,27 @@ function parseStoredJson(raw, fallback = {}) {
   }
 }
 
+function extractLangChainText(content) {
+  if (typeof content === 'string') {
+    const text = content.trim()
+    return text || null
+  }
+
+  if (Array.isArray(content)) {
+    const text = content
+      .map((part) => {
+        if (typeof part === 'string') return part
+        if (part && typeof part.text === 'string') return part.text
+        return ''
+      })
+      .join('')
+      .trim()
+    return text || null
+  }
+
+  return null
+}
+
 function normalizeSelectedDemoProviders(input = []) {
   if (!Array.isArray(input)) {
     return []
@@ -473,7 +494,7 @@ export function createApp({
       }))
       const apiKey = process.env.AI_PROVIDER_API_KEY || process.env.FEATHERLESS_API_KEY
       const baseURL = process.env.AI_PROVIDER_BASE_URL || process.env.FEATHERLESS_BASE_URL || 'https://api.featherless.ai/v1'
-      const model = process.env.AI_MODEL || process.env.FEATHERLESS_MODEL || 'Qwen/Qwen3-70B-Instruct'
+      const model = process.env.AI_MODEL || process.env.FEATHERLESS_MODEL || 'Qwen/Qwen2.5-7B-Instruct'
       const timeoutMs = Number(process.env.AI_TIMEOUT_MS || 30000)
       const maxRetries = Math.max(0, Number(process.env.AI_CONCURRENCY_RETRIES || 3))
       const retryBaseMs = Math.max(300, Number(process.env.AI_CONCURRENCY_RETRY_BASE_MS || 1500))
@@ -492,8 +513,7 @@ export function createApp({
         })
       }
 
-      const { default: OpenAI } = await import('openai')
-      const openai = new OpenAI({ baseURL, apiKey, timeout: timeoutMs })
+      const { ChatOpenAI } = await import('@langchain/openai')
 
       // Guard: reject clearly off-topic messages before hitting the model
       const lastUserMsg = [...safeMessages].reverse().find(m => m.role === 'user')?.content?.toLowerCase() || ''
@@ -535,18 +555,31 @@ HARD RULES:
       }
 
       const modelCandidates = [model, ...fallbackModels.filter((candidate) => candidate !== model)]
-      let completion = null
+      let reply = null
       let lastModelError = null
 
       for (const candidateModel of modelCandidates) {
+        const llm = new ChatOpenAI({
+          apiKey,
+          model: candidateModel,
+          temperature: 0.4,
+          maxTokens: 700,
+          configuration: {
+            baseURL,
+            timeout: timeoutMs,
+          },
+        })
+
         for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
           try {
-            completion = await enqueueAiRequest(() => openai.chat.completions.create({
-              model: candidateModel,
-              messages: [...systemMessages, ...safeMessages],
-              max_tokens: 700,
-              temperature: 0.4,
-            }))
+            const aiMessage = await enqueueAiRequest(() => llm.invoke(
+              [...systemMessages, ...safeMessages].map((message) => {
+                if (message.role === 'system') return ['system', message.content]
+                if (message.role === 'assistant') return ['ai', message.content]
+                return ['human', message.content]
+              })
+            ))
+            reply = extractLangChainText(aiMessage?.content)
             break
           } catch (candidateError) {
             lastModelError = candidateError
@@ -557,18 +590,13 @@ HARD RULES:
             await sleep(backoff)
           }
         }
-        if (completion) {
+        if (reply) {
           break
         }
       }
 
-      if (!completion) {
+      if (!reply) {
         throw lastModelError || new Error('AI provider request failed for all configured models.')
-      }
-
-      const reply = completion?.choices?.[0]?.message?.content
-      if (!reply || !String(reply).trim()) {
-        return res.status(502).json({ error: 'AI provider returned an empty response.' })
       }
 
       res.json({ reply })

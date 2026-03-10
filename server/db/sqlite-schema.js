@@ -9,7 +9,7 @@ export const sqliteSchema = `
   CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username VARCHAR(50) NOT NULL UNIQUE,
-    email VARCHAR(120),
+    email TEXT,
     email_hmac VARCHAR(64),
     password_hash TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -18,14 +18,14 @@ export const sqliteSchema = `
   CREATE TABLE IF NOT EXISTS assets (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-    name VARCHAR(100) NOT NULL,
+    name TEXT NOT NULL,
     category VARCHAR(20) NOT NULL,
     ticker VARCHAR(20),
     value NUMERIC(15,2) NOT NULL,
     cost NUMERIC(15,2) NOT NULL,
     quantity NUMERIC(20,8),
     date TEXT NOT NULL,
-    institution VARCHAR(100),
+    institution TEXT,
     details TEXT NOT NULL DEFAULT '{}',
     created_at TEXT DEFAULT (datetime('now'))
   );

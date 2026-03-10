@@ -1,14 +1,29 @@
 import { clearStoredSession } from '../auth/storage.js'
 
 async function request(path, options = {}) {
-  const response = await fetch(path, {
-    credentials: 'include', // send httpOnly auth cookie automatically
-    headers: {
-      'Content-Type': 'application/json',
-      ...(options.headers || {}),
-    },
-    ...options,
-  })
+  const { timeoutMs = 10000, ...fetchOptions } = options
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+
+  let response
+  try {
+    response = await fetch(path, {
+      credentials: 'include', // send httpOnly auth cookie automatically
+      headers: {
+        'Content-Type': 'application/json',
+        ...(fetchOptions.headers || {}),
+      },
+      signal: controller.signal,
+      ...fetchOptions,
+    })
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      throw new Error('Request timed out. Check that the API server is running.')
+    }
+    throw error
+  } finally {
+    clearTimeout(timeoutId)
+  }
 
   if (!response.ok) {
     let message = `Request failed: ${response.status}`
@@ -79,7 +94,8 @@ export async function logoutUser() {
 }
 
 export async function fetchCurrentUser() {
-  return request('/api/auth/me')
+  // Keep session restore snappy on page load.
+  return request('/api/auth/me', { timeoutMs: 3000 })
 }
 
 export async function updateProfile(payload) {

@@ -10,7 +10,7 @@ export const schema = `
   CREATE TABLE IF NOT EXISTS users (
     id SERIAL PRIMARY KEY,
     username VARCHAR(50) NOT NULL UNIQUE,
-    email VARCHAR(120) UNIQUE,
+    email TEXT UNIQUE,
     password_hash TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
@@ -18,14 +18,14 @@ export const schema = `
   CREATE TABLE IF NOT EXISTS assets (
     id SERIAL PRIMARY KEY,
     user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-    name VARCHAR(100) NOT NULL,
+    name TEXT NOT NULL,
     category VARCHAR(20) NOT NULL,
     ticker VARCHAR(20),
     value NUMERIC(15,2) NOT NULL,
     cost NUMERIC(15,2) NOT NULL,
     quantity NUMERIC(20,8),
     date DATE NOT NULL,
-    institution VARCHAR(100),
+    institution TEXT,
     details JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ DEFAULT NOW()
   );
@@ -47,13 +47,22 @@ export const schema = `
   );
 
   ALTER TABLE users
-    ADD COLUMN IF NOT EXISTS email VARCHAR(120);
+    ADD COLUMN IF NOT EXISTS email TEXT;
 
   ALTER TABLE assets
     ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
 
   ALTER TABLE assets
     ADD COLUMN IF NOT EXISTS details JSONB NOT NULL DEFAULT '{}'::jsonb;
+
+  ALTER TABLE users
+    ALTER COLUMN email TYPE TEXT;
+
+  ALTER TABLE assets
+    ALTER COLUMN name TYPE TEXT;
+
+  ALTER TABLE assets
+    ALTER COLUMN institution TYPE TEXT;
 
   ALTER TABLE net_worth_snapshots
     ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
