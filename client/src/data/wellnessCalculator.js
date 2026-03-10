@@ -2,6 +2,8 @@ import {
   WELLNESS_THRESHOLDS,
   WELLNESS_WEIGHTS,
   TARGET_ALLOCATION,
+  CATEGORY_LIQUIDITY,
+  CATEGORY_VOLATILITY,
   isStablecoin,
 } from '../../../shared/constants.js'
 
@@ -45,12 +47,53 @@ function clampScore(raw, max) {
   return Math.max(0, Math.min(max, Math.round(raw)))
 }
 
+/**
+ * Extract debt amount from asset details
+ */
+function getAssetDebt(asset) {
+  if (!asset.details) return 0
+  // Property loans
+  if (asset.details.remainingLoan) {
+    return Number(asset.details.remainingLoan) || 0
+  }
+  // Generic debt field (for future expansion)
+  if (asset.details.debt) {
+    return Number(asset.details.debt) || 0
+  }
+  return 0
+}
+
+/**
+ * Get income yield from asset details (as decimal, e.g. 0.04 for 4%)
+ */
+function getAssetYield(asset) {
+  if (!asset.details) return 0
+  // CPF interest rate
+  if (asset.details.annualInterestRate) {
+    return Number(asset.details.annualInterestRate) / 100 || 0
+  }
+  // Bond coupon rate
+  if (asset.details.couponRate) {
+    return Number(asset.details.couponRate) / 100 || 0
+  }
+  // Stock dividend yield
+  if (asset.details.dividendYield) {
+    return Number(asset.details.dividendYield) / 100 || 0
+  }
+  // Rental yield (estimated as rentalIncome * 12 / value)
+  if (asset.details.rentalIncome && asset.value > 0) {
+    return (Number(asset.details.rentalIncome) * 12) / asset.value || 0
+  }
+  return 0
+}
+
 export function calculateWellnessScore(assets, options = {}) {
   const { monthlyChangePct = null } = options
   const total = assets.reduce((sum, a) => sum + a.value, 0)
   if (total === 0) return { score: 0, breakdown: [] }
 
   const W = WELLNESS_WEIGHTS
+  const T = WELLNESS_THRESHOLDS
 
   // Build category buckets, reclassifying stablecoins as cash
   const byCategory = {}
@@ -64,77 +107,107 @@ export function calculateWellnessScore(assets, options = {}) {
     }
   })
 
+  // Calculate total debt from all assets
+  const totalDebt = assets.reduce((sum, a) => sum + getAssetDebt(a), 0)
+  const debtToAssetRatio = total > 0 ? totalDebt / total : 0
+
   // --- Factor 1: Diversification (category-level) ---
   const maxCategoryPct = Math.max(...Object.values(byCategory)) / total
-  const diversificationScore = maxCategoryPct <= WELLNESS_THRESHOLDS.DIVERSIFICATION_MAX
+  const diversificationScore = maxCategoryPct <= T.DIVERSIFICATION_MAX
     ? W.diversification
-    : clampScore(W.diversification * (1 - (maxCategoryPct - WELLNESS_THRESHOLDS.DIVERSIFICATION_MAX) / 0.6), W.diversification)
+    : clampScore(W.diversification * (1 - (maxCategoryPct - T.DIVERSIFICATION_MAX) / 0.6), W.diversification)
 
-  // --- Factor 2: Liquidity ---
-  const liquidTotal = ['CASH', 'STOCKS', 'CRYPTO'].reduce((sum, cat) => sum + (byCategory[cat] || 0), 0)
-  const liquidityRatio = liquidTotal / total
-  const liquidityScore = liquidityRatio >= WELLNESS_THRESHOLDS.LIQUIDITY_TARGET
+  // --- Factor 2: Liquidity (weighted by category liquidity) ---
+  // Use CATEGORY_LIQUIDITY to weight each asset's contribution
+  const weightedLiquidity = assets.reduce((sum, a) => {
+    const cat = (a.category === 'CRYPTO' && isStablecoin(a.ticker)) ? 'CASH' : a.category
+    const liquidityFactor = CATEGORY_LIQUIDITY[cat] ?? 0.3
+    return sum + (a.value * liquidityFactor)
+  }, 0)
+  const liquidityRatio = weightedLiquidity / total
+  const liquidityScore = liquidityRatio >= T.LIQUIDITY_TARGET
     ? W.liquidity
-    : clampScore(W.liquidity * (liquidityRatio / WELLNESS_THRESHOLDS.LIQUIDITY_TARGET), W.liquidity)
+    : clampScore(W.liquidity * (liquidityRatio / T.LIQUIDITY_TARGET), W.liquidity)
 
-  // --- Factor 3: Crypto Exposure (volatile only, stablecoins excluded) ---
+  // --- Factor 3: Crypto & FOREX Volatility Exposure ---
+  // Volatile crypto (excluding stablecoins) + FOREX should be limited
   const cryptoRatio = (byCategory.CRYPTO || 0) / total
-  const cryptoScore = cryptoRatio <= WELLNESS_THRESHOLDS.CRYPTO_MAX
+  const forexRatio = (byCategory.FOREX || 0) / total
+  const volatileRatio = cryptoRatio + forexRatio
+  const cryptoScore = volatileRatio <= T.CRYPTO_MAX
     ? W.cryptoExposure
-    : clampScore(W.cryptoExposure * (1 - (cryptoRatio - WELLNESS_THRESHOLDS.CRYPTO_MAX) / 0.7), W.cryptoExposure)
+    : clampScore(W.cryptoExposure * (1 - (volatileRatio - T.CRYPTO_MAX) / 0.7), W.cryptoExposure)
 
   // --- Factor 4: Emergency Fund ---
   const cashTotal = byCategory.CASH || 0
-  const monthsCovered = cashTotal / WELLNESS_THRESHOLDS.MONTHLY_EXPENSES
-  const emergencyScore = monthsCovered >= WELLNESS_THRESHOLDS.EMERGENCY_FUND_MONTHS
+  const monthsCovered = cashTotal / T.MONTHLY_EXPENSES
+  const emergencyScore = monthsCovered >= T.EMERGENCY_FUND_MONTHS
     ? W.emergencyFund
-    : clampScore(W.emergencyFund * (monthsCovered / WELLNESS_THRESHOLDS.EMERGENCY_FUND_MONTHS), W.emergencyFund)
+    : clampScore(W.emergencyFund * (monthsCovered / T.EMERGENCY_FUND_MONTHS), W.emergencyFund)
 
   // --- Factor 5: Concentration Risk (single-asset level) ---
   const maxAssetPct = assets.length > 0
     ? Math.max(...assets.map((a) => a.value)) / total
     : 0
-  const concentrationScore = maxAssetPct <= WELLNESS_THRESHOLDS.SINGLE_ASSET_MAX
+  const concentrationScore = maxAssetPct <= T.SINGLE_ASSET_MAX
     ? W.concentrationRisk
-    : clampScore(W.concentrationRisk * (1 - (maxAssetPct - WELLNESS_THRESHOLDS.SINGLE_ASSET_MAX) / 0.75), W.concentrationRisk)
+    : clampScore(W.concentrationRisk * (1 - (maxAssetPct - T.SINGLE_ASSET_MAX) / 0.75), W.concentrationRisk)
 
   // --- Factor 6: Asset Growth Trend ---
   let growthScore
   if (monthlyChangePct === null || monthlyChangePct === undefined) {
     growthScore = Math.round(W.assetGrowthTrend * 0.5) // neutral if no data
-  } else if (monthlyChangePct >= WELLNESS_THRESHOLDS.GROWTH_TARGET_MONTHLY) {
+  } else if (monthlyChangePct >= T.GROWTH_TARGET_MONTHLY) {
     growthScore = W.assetGrowthTrend
   } else if (monthlyChangePct >= 0) {
-    growthScore = clampScore(W.assetGrowthTrend * (monthlyChangePct / WELLNESS_THRESHOLDS.GROWTH_TARGET_MONTHLY), W.assetGrowthTrend)
+    growthScore = clampScore(W.assetGrowthTrend * (monthlyChangePct / T.GROWTH_TARGET_MONTHLY), W.assetGrowthTrend)
   } else {
     growthScore = clampScore(W.assetGrowthTrend * Math.max(0, 1 + monthlyChangePct / 10), W.assetGrowthTrend)
   }
 
-  // --- Factor 7: Income-Generating Assets ---
-  const incomeGenerating = assets.reduce((sum, a) => {
-    if (a.category === 'BONDS') return sum + a.value
-    if (a.category === 'CPF') return sum + a.value
-    if (a.category === 'PROPERTY' && Number(a.details?.rentalIncome) > 0) return sum + a.value
-    if (a.category === 'STOCKS' && Number(a.details?.dividendYield) > 0) return sum + a.value
-    return sum
-  }, 0)
-  const incomeRatio = incomeGenerating / total
-  const incomeScore = incomeRatio >= WELLNESS_THRESHOLDS.INCOME_GENERATING_TARGET
-    ? W.incomeGenerating
-    : clampScore(W.incomeGenerating * (incomeRatio / WELLNESS_THRESHOLDS.INCOME_GENERATING_TARGET), W.incomeGenerating)
+  // --- Factor 7: Income-Generating Assets (weighted by actual yields) ---
+  // Count assets that generate income, weighted by their yield
+  let incomeValue = 0
+  let weightedYield = 0
+  assets.forEach((a) => {
+    const assetYield = getAssetYield(a)
+    // Categories that inherently generate income
+    const isIncomeCategory = ['BONDS', 'CPF'].includes(a.category)
+    // Or has explicit yield data above threshold
+    const hasGoodYield = assetYield >= (T.MIN_YIELD_THRESHOLD / 100)
+    
+    if (isIncomeCategory || hasGoodYield) {
+      incomeValue += a.value
+      weightedYield += a.value * assetYield
+    }
+  })
+  const incomeRatio = incomeValue / total
+  const avgYield = incomeValue > 0 ? weightedYield / incomeValue : 0
+  // Bonus for higher yields (up to 20% boost for 5%+ avg yield)
+  const yieldBonus = Math.min(0.2, avgYield * 4)
+  const incomeScore = clampScore(
+    W.incomeGenerating * Math.min(1.2, (incomeRatio / T.INCOME_GENERATING_TARGET) * (1 + yieldBonus)),
+    W.incomeGenerating
+  )
 
-  // --- Factor 8: Rebalancing Alert ---
+  // --- Factor 8: Debt Health (NEW) ---
+  // Lower debt-to-asset ratio is better
+  const debtScore = debtToAssetRatio <= T.DEBT_TO_ASSET_MAX
+    ? W.debtHealth
+    : clampScore(W.debtHealth * (1 - (debtToAssetRatio - T.DEBT_TO_ASSET_MAX) / 0.5), W.debtHealth)
+
+  // --- Factor 9: Rebalancing Alert ---
   const maxDrift = Object.entries(TARGET_ALLOCATION).reduce((max, [cat, target]) => {
     const actual = (byCategory[cat] || 0) / total
     return Math.max(max, Math.abs(actual - target))
   }, 0)
-  const rebalanceScore = maxDrift <= WELLNESS_THRESHOLDS.REBALANCING_DRIFT_MAX
+  const rebalanceScore = maxDrift <= T.REBALANCING_DRIFT_MAX
     ? W.rebalancingAlert
-    : clampScore(W.rebalancingAlert * (1 - (maxDrift - WELLNESS_THRESHOLDS.REBALANCING_DRIFT_MAX) / 0.40), W.rebalancingAlert)
+    : clampScore(W.rebalancingAlert * (1 - (maxDrift - T.REBALANCING_DRIFT_MAX) / 0.40), W.rebalancingAlert)
 
   const score = Math.max(0, Math.min(100,
     diversificationScore + liquidityScore + cryptoScore + emergencyScore +
-    concentrationScore + growthScore + incomeScore + rebalanceScore
+    concentrationScore + growthScore + incomeScore + debtScore + rebalanceScore
   ))
 
   return {
@@ -145,35 +218,35 @@ export function calculateWellnessScore(assets, options = {}) {
         score: diversificationScore,
         max: W.diversification,
         detail: `Largest category: ${(maxCategoryPct * 100).toFixed(1)}%`,
-        status: maxCategoryPct <= WELLNESS_THRESHOLDS.DIVERSIFICATION_MAX ? 'pass' : 'fail',
+        status: maxCategoryPct <= T.DIVERSIFICATION_MAX ? 'pass' : 'fail',
       },
       {
         label: 'Liquidity',
         score: liquidityScore,
         max: W.liquidity,
-        detail: `Liquid assets: ${(liquidityRatio * 100).toFixed(1)}%`,
-        status: liquidityRatio >= WELLNESS_THRESHOLDS.LIQUIDITY_TARGET ? 'pass' : 'fail',
+        detail: `Weighted liquidity: ${(liquidityRatio * 100).toFixed(1)}%`,
+        status: liquidityRatio >= T.LIQUIDITY_TARGET ? 'pass' : 'fail',
       },
       {
-        label: 'Crypto Exposure',
+        label: 'Volatility',
         score: cryptoScore,
         max: W.cryptoExposure,
-        detail: `Volatile crypto: ${(cryptoRatio * 100).toFixed(1)}%`,
-        status: cryptoRatio <= WELLNESS_THRESHOLDS.CRYPTO_MAX ? 'pass' : 'fail',
+        detail: `Crypto + FOREX: ${(volatileRatio * 100).toFixed(1)}%`,
+        status: volatileRatio <= T.CRYPTO_MAX ? 'pass' : 'fail',
       },
       {
         label: 'Emergency Fund',
         score: emergencyScore,
         max: W.emergencyFund,
         detail: `${monthsCovered.toFixed(1)} months covered`,
-        status: monthsCovered >= WELLNESS_THRESHOLDS.EMERGENCY_FUND_MONTHS ? 'pass' : 'fail',
+        status: monthsCovered >= T.EMERGENCY_FUND_MONTHS ? 'pass' : 'fail',
       },
       {
         label: 'Concentration',
         score: concentrationScore,
         max: W.concentrationRisk,
         detail: `Largest asset: ${(maxAssetPct * 100).toFixed(1)}%`,
-        status: maxAssetPct <= WELLNESS_THRESHOLDS.SINGLE_ASSET_MAX ? 'pass' : 'fail',
+        status: maxAssetPct <= T.SINGLE_ASSET_MAX ? 'pass' : 'fail',
       },
       {
         label: 'Growth Trend',
@@ -186,15 +259,22 @@ export function calculateWellnessScore(assets, options = {}) {
         label: 'Income Assets',
         score: incomeScore,
         max: W.incomeGenerating,
-        detail: `${(incomeRatio * 100).toFixed(1)}% income-generating`,
-        status: incomeRatio >= WELLNESS_THRESHOLDS.INCOME_GENERATING_TARGET ? 'pass' : 'fail',
+        detail: `${(incomeRatio * 100).toFixed(1)}% income-gen${avgYield > 0 ? ` (${(avgYield * 100).toFixed(1)}% avg yield)` : ''}`,
+        status: incomeRatio >= T.INCOME_GENERATING_TARGET ? 'pass' : 'fail',
+      },
+      {
+        label: 'Debt Health',
+        score: debtScore,
+        max: W.debtHealth,
+        detail: totalDebt > 0 ? `${(debtToAssetRatio * 100).toFixed(1)}% debt ratio` : 'No debt recorded',
+        status: debtToAssetRatio <= T.DEBT_TO_ASSET_MAX ? 'pass' : 'fail',
       },
       {
         label: 'Rebalancing',
         score: rebalanceScore,
         max: W.rebalancingAlert,
         detail: `Max drift: ${(maxDrift * 100).toFixed(1)}%`,
-        status: maxDrift <= WELLNESS_THRESHOLDS.REBALANCING_DRIFT_MAX ? 'pass' : 'fail',
+        status: maxDrift <= T.REBALANCING_DRIFT_MAX ? 'pass' : 'fail',
       },
     ],
   }
