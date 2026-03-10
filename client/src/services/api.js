@@ -334,7 +334,6 @@ export async function fetchUobAccounts() {
 export async function sendChatMessage(messages, portfolioContext = null) {
   return request('/api/chat', {
     method: 'POST',
-    timeoutMs: 45000,
     body: JSON.stringify({ messages, portfolioContext }),
   })
 }

@@ -93,9 +93,9 @@ function convertSqlForSqlite(sql, params = []) {
 // ── SQLite Adapter ────────────────────────────────────────────
 
 class SQLiteClient {
-  constructor(db, inTransaction = false) {
+  constructor(db, pool = null) {
     this.db = db
-    this.inTransaction = inTransaction
+    this.pool = pool
   }
 
   async query(sql, params = []) {
@@ -106,20 +106,33 @@ class SQLiteClient {
     
     try {
       if (trimmedSql === 'BEGIN' || trimmedSql === 'BEGIN TRANSACTION') {
-        this.db.exec('BEGIN TRANSACTION')
-        this.inTransaction = true
+        // Only start a transaction if one isn't already active (check pool state)
+        if (this.pool && !this.pool.inTransaction) {
+          this.db.exec('BEGIN TRANSACTION')
+          this.pool.inTransaction = true
+        } else if (!this.pool) {
+          this.db.exec('BEGIN TRANSACTION')
+        }
         return { rows: [], rowCount: 0 }
       }
       
       if (trimmedSql === 'COMMIT') {
-        this.db.exec('COMMIT')
-        this.inTransaction = false
+        if (this.pool && this.pool.inTransaction) {
+          this.db.exec('COMMIT')
+          this.pool.inTransaction = false
+        } else if (!this.pool) {
+          this.db.exec('COMMIT')
+        }
         return { rows: [], rowCount: 0 }
       }
       
       if (trimmedSql === 'ROLLBACK') {
-        this.db.exec('ROLLBACK')
-        this.inTransaction = false
+        if (this.pool && this.pool.inTransaction) {
+          this.db.exec('ROLLBACK')
+          this.pool.inTransaction = false
+        } else if (!this.pool) {
+          this.db.exec('ROLLBACK')
+        }
         return { rows: [], rowCount: 0 }
       }
       
@@ -193,18 +206,19 @@ class SQLitePool {
   constructor(dbPath, Database) {
     this.dbPath = dbPath
     this.db = new Database(dbPath)
+    this.inTransaction = false  // Track transaction state at pool level
     this.db.pragma('journal_mode = WAL')
     this.db.pragma('foreign_keys = ON')
     console.log(`[db] Using SQLite database at ${dbPath}`)
   }
 
   async query(sql, params = []) {
-    const client = new SQLiteClient(this.db)
+    const client = new SQLiteClient(this.db, this)
     return client.query(sql, params)
   }
 
   async connect() {
-    return new SQLiteClient(this.db)
+    return new SQLiteClient(this.db, this)
   }
 
   async end() {

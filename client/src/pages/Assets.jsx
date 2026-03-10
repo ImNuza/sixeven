@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { ArrowDownUp, ChevronLeft, ChevronRight, Download, Link2, Pencil, RefreshCw, Search, Trash2, Wallet, CheckSquare, Square } from 'lucide-react'
+import { ArrowDownUp, ChevronLeft, ChevronRight, Download, Pencil, RefreshCw, Search, Trash2, Wallet, CheckSquare, Square, Plus } from 'lucide-react'
 import AssetForm from '../components/AssetForm'
+import CalculatorModal from '../components/Calculator'
 import { ASSET_CATEGORIES, CATEGORY_COLORS } from '../../../shared/constants.js'
 import { deleteAsset, fetchAssetsPage, fetchPrices, refreshPrices, updateAsset } from '../services/api.js'
 import { summarizeAssetDetails } from '../data/assetDetails.js'
@@ -59,7 +60,6 @@ function getInitialParams(searchParams) {
     category: searchParams.get('category') || 'ALL',
     pricing: searchParams.get('pricing') || 'ALL',
     dateFrom: searchParams.get('dateFrom') || '',
-    dateTo: searchParams.get('dateTo') || '',
     sortBy: searchParams.get('sortBy') || 'date',
     sortDirection: searchParams.get('sortDirection') || 'desc',
     page: Number.parseInt(searchParams.get('page') || '1', 10) || 1,
@@ -85,10 +85,10 @@ export default function Assets() {
   const [categoryFilter, setCategoryFilter] = useState(initialParams.category)
   const [pricingFilter, setPricingFilter] = useState(initialParams.pricing)
   const [dateFrom, setDateFrom] = useState(initialParams.dateFrom)
-  const [dateTo, setDateTo] = useState(initialParams.dateTo)
   const [sortBy, setSortBy] = useState(initialParams.sortBy)
   const [sortDirection, setSortDirection] = useState(initialParams.sortDirection)
   const [page, setPage] = useState(initialParams.page)
+  const [showCalc, setShowCalc] = useState(false)
 
   // ── Multi-select ──────────────────────────────────────────────
   const [selected, setSelected] = useState(new Set())
@@ -132,14 +132,13 @@ export default function Assets() {
     if (categoryFilter !== 'ALL') p.category = categoryFilter
     if (pricingFilter !== 'ALL') p.pricing = pricingFilter
     if (dateFrom) p.dateFrom = dateFrom
-    if (dateTo) p.dateTo = dateTo
     if (sortBy !== 'date') p.sortBy = sortBy
     if (sortDirection !== 'desc') p.sortDirection = sortDirection
     if (page > 1) p.page = String(page)
     setSearchParams(p, { replace: true })
-  }, [search, categoryFilter, pricingFilter, dateFrom, dateTo, sortBy, sortDirection, page, setSearchParams])
+  }, [search, categoryFilter, pricingFilter, dateFrom, sortBy, sortDirection, page, setSearchParams])
 
-  useEffect(() => { setPage(1) }, [debouncedSearch, categoryFilter, pricingFilter, dateFrom, dateTo])
+  useEffect(() => { setPage(1) }, [debouncedSearch, categoryFilter, pricingFilter, dateFrom])
 
   // Detect if we're coming from onboarding with refresh flag
   useEffect(() => {
@@ -167,7 +166,7 @@ export default function Assets() {
         setError('')
         console.log('[Assets] Loading assets...', { page, pageSize: pagination.pageSize, search: debouncedSearch, category: categoryFilter })
         const [assetResult, priceRows] = await Promise.all([
-          fetchAssetsPage({ page, pageSize: pagination.pageSize, search: debouncedSearch, category: categoryFilter, pricing: pricingFilter, dateFrom, dateTo, sortBy, sortDirection }),
+          fetchAssetsPage({ page, pageSize: pagination.pageSize, search: debouncedSearch, category: categoryFilter, pricing: pricingFilter, dateFrom, sortBy, sortDirection }),
           fetchPrices(),
         ])
         if (cancelled) return
@@ -191,7 +190,7 @@ export default function Assets() {
     loadAssets()
     const id = window.setInterval(() => loadAssets(false), 60000)
     return () => { cancelled = true; window.clearInterval(id) }
-  }, [page, debouncedSearch, categoryFilter, pricingFilter, dateFrom, dateTo, sortBy, sortDirection, pagination.pageSize])
+  }, [page, debouncedSearch, categoryFilter, pricingFilter, dateFrom, sortBy, sortDirection, pagination.pageSize])
 
   const stats = useMemo(() => {
     const liveTracked = assets.filter(a => a.ticker && a.quantity != null).length
@@ -204,7 +203,7 @@ export default function Assets() {
 
   async function reloadCurrentPage() {
     const [assetResult, priceRows] = await Promise.all([
-      fetchAssetsPage({ page, pageSize: pagination.pageSize, search: debouncedSearch, category: categoryFilter, pricing: pricingFilter, dateFrom, dateTo, sortBy, sortDirection }),
+      fetchAssetsPage({ page, pageSize: pagination.pageSize, search: debouncedSearch, category: categoryFilter, pricing: pricingFilter, dateFrom, sortBy, sortDirection }),
       fetchPrices(),
     ])
     setAssets(assetResult.items)
@@ -305,29 +304,21 @@ export default function Assets() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
-      <Link
-        to="/account"
-        className="flex items-center justify-between gap-4 rounded-3xl border px-5 py-4 transition-all hover:border-accent/30 hover:bg-accent/[0.04]"
-        style={{ borderColor: 'var(--app-border)', background: 'var(--app-surface)' }}
-      >
-        <div className="flex items-center gap-3">
-          <div className="h-9 w-9 rounded-2xl flex items-center justify-center bg-accent/10 flex-shrink-0">
-            <Link2 className="h-4 w-4 text-accent" />
-          </div>
-          <div>
-            <p className="text-sm font-semibold" style={{ color: 'var(--app-text)' }}>Connect Data Sources</p>
-            <p className="text-xs" style={{ color: 'var(--app-text-muted)' }}>Link Singpass · Bank Accounts · Crypto Wallets</p>
-          </div>
-        </div>
-        <span className="text-xs font-medium text-accent">Open →</span>
-      </Link>
-
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold" style={{ color: 'var(--app-text)' }}>Asset Inventory</h1>
           <p className="mt-1 text-sm" style={{ color: 'var(--app-text-muted)' }}>Manage every asset record that feeds the SafeSeven dashboard.</p>
         </div>
         <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setShowCalc(true)}
+            className="inline-flex items-center gap-2 rounded-xl border px-4 py-3 text-sm font-medium transition hover:bg-white/[0.07]"
+            style={{ borderColor: 'var(--app-border)', background: 'var(--app-surface)', color: 'var(--app-text-soft)' }}
+          >
+            <Plus className="h-4 w-4" />
+            Add Asset
+          </button>
           <button
             type="button"
             onClick={handleRefresh}
@@ -376,14 +367,6 @@ export default function Assets() {
             placeholder="From date"
             className="app-input"
             title="Filter assets acquired from this date"
-          />
-          <input
-            type="date"
-            value={dateTo}
-            onChange={e => setDateTo(e.target.value)}
-            placeholder="To date"
-            className="app-input"
-            title="Filter assets acquired until this date"
           />
           <button
             type="button"
@@ -592,6 +575,9 @@ export default function Assets() {
           </div>
         </div>
       )}
+
+      {/* Add Asset Modal */}
+      {showCalc && <CalculatorModal onClose={() => setShowCalc(false)} />}
     </div>
   )
 }

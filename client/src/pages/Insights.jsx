@@ -511,7 +511,7 @@ export default function Insights() {
       </div>
 
       {/* ── Section 5: Scenario Lab ──────────────────────────── */}
-      <ScenarioSimulator assets={assets} userProfile={onboardingProfile} />
+      <ScenarioSimulator assets={assets} userProfile={onboardingProfile} summary={summary} />
 
     </div>
   )

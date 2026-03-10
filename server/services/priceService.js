@@ -1,32 +1,9 @@
 import axios from 'axios'
 import { pool } from '../db.js'
 import { recordNetWorthSnapshot } from './portfolioService.js'
-import { resolveCoinGeckoId } from '../../shared/constants.js'
 
 const ALPHA_VANTAGE_KEY = process.env.ALPHA_VANTAGE_KEY
 const refreshLocks = new Map()
-
-async function getCryptoPrices(coinIds) {
-  if (!coinIds.length) {
-    return {}
-  }
-
-  const ids = coinIds.join(',')
-  const url = `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd,sgd`
-  try {
-    const { data } = await axios.get(url, { 
-      timeout: 10000,
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
-    })
-    return data
-  } catch (err) {
-    console.error('[CoinGecko Error]', err.message || err.code)
-    if (err.response) {
-      console.error('  Status:', err.response.status, 'Data:', err.response.data)
-    }
-    throw err
-  }
-}
 
 async function getStockPriceAlphaVantage(ticker) {
   const url = `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${ticker}&apikey=${ALPHA_VANTAGE_KEY}`
@@ -122,35 +99,7 @@ async function refreshUserPricesInternal(userId, snapshotSource = 'price_refresh
       return { refreshed: false, reason: 'no_live_assets' }
     }
 
-    const cryptoAssets = assets.filter((asset) => asset.category === 'CRYPTO')
     const stockAssets = assets.filter((asset) => asset.category === 'STOCKS')
-
-    if (cryptoAssets.length) {
-      try {
-        // Map each asset's ticker to a CoinGecko ID (handles both "ETH" and "ethereum")
-        const tickerToGeckoId = Object.fromEntries(
-          cryptoAssets.map((a) => [a.ticker, resolveCoinGeckoId(a.ticker)])
-        )
-        const uniqueGeckoIds = [...new Set(Object.values(tickerToGeckoId).filter(Boolean))]
-        const priceMap = await getCryptoPrices(uniqueGeckoIds)
-
-        for (const asset of cryptoAssets) {
-          const geckoId = tickerToGeckoId[asset.ticker]
-          const coinData = geckoId ? priceMap[geckoId] : null
-          if (!coinData) {
-            continue
-          }
-
-          const priceSgd = coinData.sgd || coinData.usd * usdSgd
-          const priceUsd = coinData.usd
-          await upsertPrice(client, geckoId, priceUsd, priceSgd)
-          await updateAssetValue(client, asset.id, priceSgd, parseFloat(asset.quantity))
-        }
-      } catch (err) {
-        console.error('[CoinGecko Refresh] Error updating crypto prices:', err.message)
-        // Keep the refresh moving if CoinGecko is unavailable.
-      }
-    }
 
     await Promise.all(stockAssets.map(async (asset) => {
       try {
