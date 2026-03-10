@@ -37,7 +37,6 @@ const DEFAULT_WIDGETS = [
   { id: 'allocation', label: 'Asset Allocation', span: 'small' },
   { id: 'wellness',   label: 'Wellness Score',   span: 'half' },
   { id: 'insights',   label: 'Quick Insights',   span: 'half' },
-  { id: 'reviews',    label: 'Review Schedule',  span: 'full' },
   { id: 'holdings',   label: 'Top Holdings',     span: 'full' },
 ]
 
@@ -210,7 +209,6 @@ export default function Dashboard() {
   const [activeRange, setActiveRange] = useState('ALL')
   const [widgets, setWidgets] = useState(() => loadWidgets(user?.id))
   const [showCustomize, setShowCustomize] = useState(false)
-  const [viewMode, setViewMode] = useState('client') // 'client' | 'advisor'
 
   useEffect(() => {
     let cancelled = false
@@ -244,10 +242,6 @@ export default function Dashboard() {
   }, [user?.id])
 
   useEffect(() => {
-    setReviewReminderDay(user?.reviewReminderDay ?? null)
-  }, [user?.reviewReminderDay])
-
-  useEffect(() => {
     function syncOnboardingProfile() {
       setOnboardingProfile(loadOnboardingProfile(user?.id))
     }
@@ -256,7 +250,7 @@ export default function Dashboard() {
     return () => window.removeEventListener('safeseven:onboarding', syncOnboardingProfile)
   }, [user?.id])
 
-  const { score, breakdown, goalHints } = useMemo(
+  const { score, breakdown } = useMemo(
     () => calculateWellnessScore(assets, { monthlyChangePct: summary?.monthlyChangePct ?? null, userProfile: onboardingProfile }),
     [assets, summary, onboardingProfile]
   )
@@ -283,7 +277,7 @@ export default function Dashboard() {
   const totalGainLoss = summary?.totalGainLoss ?? 0
   const gainLossPct = totalCost > 0 ? (summary?.gainLossPct ?? 0).toFixed(1) : '0.0'
   const monthlyChange = summary?.monthlyChange ?? 0
-  const monthlyChangePct = summary ? summary.monthlyChangePct.toFixed(1) : '0.0'
+  const monthlyChangePct = summary ? (summary.monthlyChangePct ?? 0).toFixed(1) : '0.0'
   const lastSync = prices[0]?.updated_at
     ? new Date(prices[0].updated_at).toLocaleString('en-SG', { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' })
     : null
@@ -337,26 +331,7 @@ export default function Dashboard() {
     notify({ type: 'info', title: 'Dashboard updated', message: 'Your layout has been saved.' })
   }
 
-  async function handleSaveReviewReminder() {
-    try {
-      setIsSavingReviewDay(true)
-      await updateProfile({
-        email: user?.email || '',
-        reviewReminderDay,
-      })
-      notify({
-        type: 'success',
-        title: reviewReminderDay ? 'Review schedule saved' : 'Review schedule cleared',
-        message: reviewReminderDay
-          ? `Monthly review set for the ${formatOrdinalDay(reviewReminderDay)}.`
-          : 'Monthly review reminder removed.',
-      })
-    } catch (err) {
-      notify({ type: 'error', title: 'Schedule save failed', message: err.message })
-    } finally {
-      setIsSavingReviewDay(false)
-    }
-  }
+
 
   // ── Export helpers ────────────────────────────────────────
   function getExportData() {
@@ -644,18 +619,7 @@ export default function Dashboard() {
           )
         }
 
-        if (widget.id === 'reviews') {
-          return (
-            <div key="reviews">
-              <ReviewScheduleCard
-                reviewReminderDay={reviewReminderDay}
-                onSelectDay={setReviewReminderDay}
-                onSave={handleSaveReviewReminder}
-                isSaving={isSavingReviewDay}
-              />
-            </div>
-          )
-        }
+
 
         if (widget.id === 'holdings' && topHoldings.length > 0) {
           return (
@@ -712,120 +676,6 @@ export default function Dashboard() {
 }
 
 // ── Sub-components ────────────────────────────────────────────
-function ReviewScheduleCard({ reviewReminderDay, onSelectDay, onSave, isSaving }) {
-  const days = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
-  const weeks = [
-    [1, 2, 3, 4, 5, 6, 7],
-    [8, 9, 10, 11, 12, 13, 14],
-    [15, 16, 17, 18, 19, 20, 21],
-    [22, 23, 24, 25, 26, 27, 28],
-  ]
-
-  return (
-    <div
-      className="rounded-[2rem] border p-6 md:p-8"
-      style={{
-        background: 'linear-gradient(135deg, rgba(255,255,255,0.92), rgba(249,247,241,0.88))',
-        borderColor: 'rgba(15,23,42,0.05)',
-        boxShadow: '0 10px 35px rgba(15,23,42,0.10)',
-      }}
-    >
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <p className="mb-2 text-[11px] uppercase tracking-[0.28em]" style={{ color: '#c9a13e' }}>Grow</p>
-          <h3 className="text-[2rem] font-semibold tracking-tight" style={{ color: '#17203a' }}>Scheduled wealth reviews</h3>
-          <p className="mt-2 text-lg" style={{ color: '#64748b' }}>Set it once. Stay on track forever.</p>
-          <p className="mt-3 text-sm" style={{ color: '#64748b' }}>
-            Choose a monthly reminder day to review and update your assets from the dashboard.
-          </p>
-        </div>
-        <div
-          className="hidden md:flex h-12 w-12 items-center justify-center rounded-2xl"
-          style={{ background: 'rgba(201,161,62,0.14)', color: '#c9a13e' }}
-        >
-          <CalendarDays className="h-5 w-5" />
-        </div>
-      </div>
-
-      <div className="mt-8">
-        <div className="grid grid-cols-7 gap-3 mb-3">
-          {days.map((label) => (
-            <div key={label} className="text-center text-sm" style={{ color: '#64748b' }}>
-              {label}
-            </div>
-          ))}
-        </div>
-
-        <div className="space-y-3">
-          {weeks.map((week, rowIdx) => (
-            <div key={rowIdx} className="grid grid-cols-7 gap-3">
-              {week.map((day) => {
-                const active = day === reviewReminderDay
-                return (
-                  <button
-                    key={day}
-                    type="button"
-                    onClick={() => onSelectDay(day)}
-                    className="aspect-square rounded-2xl text-xl font-medium transition-all duration-200"
-                    style={{
-                      color: active ? '#ffffff' : '#64748b',
-                      background: active ? 'linear-gradient(135deg, #c8a138, #e0c45b)' : 'transparent',
-                      boxShadow: active ? '0 10px 22px rgba(201,161,62,0.28)' : 'none',
-                      transform: active ? 'translateY(-1px)' : 'none',
-                    }}
-                  >
-                    {day}
-                  </button>
-                )
-              })}
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="mt-8 flex flex-col gap-3 md:flex-row md:items-center">
-        <button
-          type="button"
-          onClick={onSave}
-          disabled={isSaving}
-          className="flex-1 rounded-2xl px-6 py-4 text-lg font-semibold transition-all disabled:opacity-60"
-          style={{
-            background: 'linear-gradient(135deg, #c8a138, #e0c45b)',
-            color: '#fff',
-            boxShadow: '0 14px 28px rgba(201,161,62,0.24)',
-          }}
-        >
-          {isSaving
-            ? 'Saving...'
-            : reviewReminderDay
-              ? `Save ${formatOrdinalDay(reviewReminderDay)} schedule`
-              : 'Save schedule'}
-        </button>
-        <button
-          type="button"
-          onClick={() => onSelectDay(null)}
-          className="rounded-2xl border px-5 py-4 text-sm font-medium transition-colors"
-          style={{
-            borderColor: 'rgba(100,116,139,0.2)',
-            color: '#64748b',
-            background: 'rgba(255,255,255,0.55)',
-          }}
-        >
-          Clear
-        </button>
-      </div>
-
-      <div className="mt-4 rounded-2xl px-4 py-3" style={{ background: 'rgba(23,32,58,0.04)' }}>
-        <p className="text-sm font-medium" style={{ color: '#17203a' }}>
-          {reviewReminderDay
-            ? `Your dashboard review reminder is set for the ${formatOrdinalDay(reviewReminderDay)} of each month.`
-            : 'No monthly review reminder is set yet.'}
-        </p>
-      </div>
-    </div>
-  )
-}
-
 function TrendChartContent({ filteredHistory, activeRange, setActiveRange }) {
   return (
     <>
