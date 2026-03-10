@@ -88,45 +88,17 @@ export const WELLNESS_THRESHOLDS = {
   GROWTH_TARGET_MONTHLY: 0.5,
   INCOME_GENERATING_TARGET: 0.3,
   REBALANCING_DRIFT_MAX: 0.10,
-  DEBT_TO_ASSET_MAX: 0.5,          // Debt should be < 50% of total assets
-  FOREX_VOLATILITY_MAX: 0.10,      // FOREX should be < 10% of portfolio
-  MIN_YIELD_THRESHOLD: 2.0,        // Minimum yield % to count as income-generating
 }
 
 export const WELLNESS_WEIGHTS = {
-  diversification: 12,
-  liquidity: 12,
+  diversification: 15,
+  liquidity: 15,
   cryptoExposure: 10,
-  emergencyFund: 12,
-  concentrationRisk: 12,
+  emergencyFund: 15,
+  concentrationRisk: 15,
   assetGrowthTrend: 10,
   incomeGenerating: 10,
-  debtHealth: 12,                  // New: debt-to-asset ratio
   rebalancingAlert: 10,
-}
-
-// Liquidity classification for each category (0-1 scale)
-export const CATEGORY_LIQUIDITY = {
-  CASH: 1.0,      // Fully liquid
-  STOCKS: 0.9,    // Highly liquid (T+2 settlement)
-  CRYPTO: 0.85,   // Liquid but volatile
-  FOREX: 0.7,     // Liquid but volatile and conversion costs
-  BONDS: 0.5,     // Semi-liquid, may have early redemption penalties
-  CPF: 0.1,       // Locked until retirement (very illiquid)
-  PROPERTY: 0.05, // Very illiquid
-  OTHER: 0.3,     // Varies
-}
-
-// Volatility classification for risk assessment (0-1, higher = more volatile)
-export const CATEGORY_VOLATILITY = {
-  CASH: 0.0,
-  BONDS: 0.1,
-  CPF: 0.05,
-  STOCKS: 0.4,
-  PROPERTY: 0.2,
-  FOREX: 0.5,
-  CRYPTO: 0.8,
-  OTHER: 0.3,
 }
 
 export const TARGET_ALLOCATION = {

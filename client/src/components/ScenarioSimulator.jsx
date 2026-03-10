@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import { Sliders, TrendingUp, TrendingDown, RefreshCcw, Zap, ArrowRight, ChevronDown, ChevronUp, CreditCard } from 'lucide-react'
+import { Sliders, TrendingUp, TrendingDown, RefreshCcw, Zap, ArrowRight, ChevronDown, ChevronUp } from 'lucide-react'
 import { calculateWellnessScore, getWellnessStatus } from '../data/wellnessCalculator.js'
 import { ASSET_CATEGORIES } from '../../../shared/constants.js'
 
@@ -15,19 +15,6 @@ const SCENARIOS = [
     min: 1000,
     max: 50000,
     step: 1000,
-    unit: 'SGD',
-  },
-  {
-    id: 'pay_debt',
-    label: 'Pay Down Debt',
-    description: 'Simulate reducing property loans',
-    icon: CreditCard,
-    type: 'reduce_debt',
-    category: 'PROPERTY',
-    defaultValue: 10000,
-    min: 1000,
-    max: 100000,
-    step: 5000,
     unit: 'SGD',
   },
   {
@@ -85,7 +72,7 @@ function applyScenario(assets, scenario, value) {
   if (!assets.length) return assets
 
   return assets.map((asset) => {
-    const newAsset = { ...asset, details: { ...asset.details } }
+    const newAsset = { ...asset }
 
     if (scenario.type === 'add' && asset.category === scenario.category) {
       // Distribute the added value proportionally among assets in this category
@@ -97,16 +84,6 @@ function applyScenario(assets, scenario, value) {
     if (scenario.type === 'multiply' && scenario.categories?.includes(asset.category)) {
       const multiplier = 1 + value / 100
       newAsset.value = asset.value * multiplier
-    }
-
-    if (scenario.type === 'reduce_debt' && asset.category === scenario.category) {
-      // Reduce remaining loan on property assets
-      if (newAsset.details?.remainingLoan) {
-        const currentLoan = Number(newAsset.details.remainingLoan) || 0
-        const propertyAssets = assets.filter((a) => a.category === scenario.category && a.details?.remainingLoan)
-        const share = value / propertyAssets.length
-        newAsset.details.remainingLoan = Math.max(0, currentLoan - share)
-      }
     }
 
     if (scenario.type === 'transfer') {

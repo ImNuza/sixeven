@@ -141,7 +141,7 @@ export default function ChatPanel() {
                 </span>
               </div>
               <p className="text-[10px] mt-0.5" style={{ color: 'var(--app-text-muted)' }}>
-                Qwen 2.5 7B · Financial Wellness Advisor
+                Qwen 70B · Financial Wellness Advisor
               </p>
             </div>
           </div>
