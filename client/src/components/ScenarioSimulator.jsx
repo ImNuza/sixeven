@@ -93,79 +93,95 @@ function ParamSlider({ param, value, onChange }) {
   )
 }
 
-function ParamSelect({ param, value, onChange }) {
-  return (
-    <div>
-      <p className="text-xs text-white/50 mb-1.5">{param.label}</p>
-      <div className="flex flex-wrap gap-1.5">
-        {param.options.map(opt => {
-          const displayLabel = ASSET_CATEGORIES[opt] || opt
-          const isActive = value === opt
-          return (
-            <button
-              key={opt}
-              type="button"
-              onClick={() => onChange(opt)}
-              className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all ${
-                isActive
-                  ? 'bg-purple-400/20 text-purple-300 border border-purple-400/30'
-                  : 'bg-white/[0.04] text-white/50 border border-white/[0.06] hover:border-white/[0.12]'
-              }`}
-            >
-              {displayLabel}
-            </button>
-          )
-        })}
-      </div>
-    </div>
-  )
+function applyScenario(assets, scenario, value) {
+  if (!assets.length) return assets
+
+  return assets.map((asset) => {
+    const newAsset = { ...asset, details: { ...asset.details } }
+
+    if (scenario.type === 'add' && asset.category === scenario.category) {
+      // Distribute the added value proportionally among assets in this category
+      const categoryAssets = assets.filter((a) => a.category === scenario.category)
+      const share = value / categoryAssets.length
+      newAsset.value = asset.value + share
+    }
+
+    if (scenario.type === 'multiply' && scenario.categories?.includes(asset.category)) {
+      const multiplier = 1 + value / 100
+      newAsset.value = asset.value * multiplier
+    }
+
+    if (scenario.type === 'reduce_debt' && asset.category === scenario.category) {
+      // Reduce remaining loan on property assets
+      if (newAsset.details?.remainingLoan) {
+        const currentLoan = Number(newAsset.details.remainingLoan) || 0
+        const propertyAssets = assets.filter((a) => a.category === scenario.category && a.details?.remainingLoan)
+        const share = value / propertyAssets.length
+        newAsset.details.remainingLoan = Math.max(0, currentLoan - share)
+      }
+    }
+
+    if (scenario.type === 'transfer') {
+      if (asset.category === scenario.from) {
+        const reduction = asset.value * (value / 100)
+        newAsset.value = asset.value - reduction
+      }
+      // For transfers, we'll handle the "to" category after
+    }
+
+    return newAsset
+  })
 }
 
-// ── Main Component ───────────────────────────────────────────────
+function applyTransferTo(assets, scenario, value) {
+  if (scenario.type !== 'transfer') return assets
 
-export default function ScenarioSimulator({ assets, summary }) {
-  const [expanded, setExpanded] = useState(true)
-  const [activeScenarioId, setActiveScenarioId] = useState(SCENARIOS[0].id)
-  const [paramValues, setParamValues] = useState(() => {
-    const init = {}
-    SCENARIOS.forEach(s => {
-      init[s.id] = {}
-      s.params.forEach(p => { init[s.id][p.key] = p.default })
-    })
-    return init
+  const fromAssets = assets.filter((a) => a.category === scenario.from)
+  const totalTransfer = fromAssets.reduce((sum, a) => sum + a.value * (value / 100), 0)
+
+  const toAssets = assets.filter((a) => a.category === scenario.to)
+
+  if (toAssets.length === 0 && totalTransfer > 0) {
+    // Create a new synthetic asset for the target category
+    return [
+      ...assets,
+      {
+        id: `scenario-${scenario.to}`,
+        name: `${ASSET_CATEGORIES[scenario.to] || scenario.to} (Rebalanced)`,
+        category: scenario.to,
+        value: totalTransfer,
+        cost: totalTransfer,
+      },
+    ]
+  }
+
+  // Distribute transfer proportionally to existing assets in target category
+  const toTotal = toAssets.reduce((sum, a) => sum + a.value, 0)
+  return assets.map((asset) => {
+    if (asset.category === scenario.to) {
+      const share = toTotal > 0 ? asset.value / toTotal : 1 / toAssets.length
+      return { ...asset, value: asset.value + totalTransfer * share }
+    }
+    return asset
   })
-  const [showFactors, setShowFactors] = useState(false)
+}
 
-  const activeScenario = SCENARIOS.find(s => s.id === activeScenarioId) || SCENARIOS[0]
-  const currentParams = paramValues[activeScenarioId] || {}
+export default function ScenarioSimulator({ assets, userProfile }) {
+  const [expanded, setExpanded] = useState(true)
+  const [activeScenario, setActiveScenario] = useState(SCENARIOS[0])
+  const [sliderValue, setSliderValue] = useState(SCENARIOS[0].defaultValue)
 
-  function handleScenarioChange(id) {
-    setActiveScenarioId(id)
-  }
-
-  function updateParam(key, value) {
-    setParamValues(prev => ({
-      ...prev,
-      [activeScenarioId]: { ...prev[activeScenarioId], [key]: value },
-    }))
-  }
-
-  // Run projection
-  const projection = useMemo(
-    () => projectScenario(assets, activeScenarioId, currentParams),
-    [assets, activeScenarioId, currentParams],
-  )
-
-  // Current and projected scores
-  const currentScore = useMemo(() => calculateWellnessScore(assets), [assets])
+  const currentScore = useMemo(() => calculateWellnessScore(assets, { userProfile }), [assets, userProfile])
   const currentStatus = useMemo(() => getWellnessStatus(currentScore.score), [currentScore.score])
 
-  const finalPoint = projection.length > 0 ? projection[projection.length - 1] : null
-  const projectedScoreObj = useMemo(
-    () => finalPoint ? { score: finalPoint.wellnessScore } : { score: 0 },
-    [finalPoint],
-  )
-  const projectedStatus = useMemo(() => getWellnessStatus(projectedScoreObj.score), [projectedScoreObj.score])
+  const projectedAssets = useMemo(() => {
+    let modified = applyScenario(assets, activeScenario, sliderValue)
+    modified = applyTransferTo(modified, activeScenario, sliderValue)
+    return modified
+  }, [assets, activeScenario, sliderValue])
+
+  const projectedScore = useMemo(() => calculateWellnessScore(projectedAssets, { userProfile }), [projectedAssets, userProfile])
+  const projectedStatus = useMemo(() => getWellnessStatus(projectedScore.score), [projectedScore.score])
 
   const scoreDelta = finalPoint ? finalPoint.wellnessScore - currentScore.score : 0
   const totalCurrent = assets.reduce((s, a) => s + a.value, 0)

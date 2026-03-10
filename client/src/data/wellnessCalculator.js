@@ -3,6 +3,9 @@ import {
   WELLNESS_WEIGHTS,
   TARGET_ALLOCATION,
   isStablecoin,
+  parseMonthlyExpenses,
+  parseAnnualIncome,
+  getRiskAdjustedThresholds,
 } from '../../../shared/constants.js'
 
 export function getWellnessStatus(score) {
@@ -46,11 +49,12 @@ function clampScore(raw, max) {
 }
 
 export function calculateWellnessScore(assets, options = {}) {
-  const { monthlyChangePct = null } = options
+  const { monthlyChangePct = null, userProfile = null } = options
   const total = assets.reduce((sum, a) => sum + a.value, 0)
   if (total === 0) return { score: 0, breakdown: [] }
 
   const W = WELLNESS_WEIGHTS
+  const T = WELLNESS_THRESHOLDS
 
   // Build category buckets, reclassifying stablecoins as cash
   const byCategory = {}
@@ -83,10 +87,10 @@ export function calculateWellnessScore(assets, options = {}) {
     ? W.cryptoExposure
     : clampScore(W.cryptoExposure * (1 - (cryptoRatio - WELLNESS_THRESHOLDS.CRYPTO_MAX) / 0.7), W.cryptoExposure)
 
-  // --- Factor 4: Emergency Fund ---
+  // --- Factor 4: Emergency Fund (uses actual user expenses when available) ---
   const cashTotal = byCategory.CASH || 0
-  const monthsCovered = cashTotal / WELLNESS_THRESHOLDS.MONTHLY_EXPENSES
-  const emergencyScore = monthsCovered >= WELLNESS_THRESHOLDS.EMERGENCY_FUND_MONTHS
+  const monthsCovered = cashTotal / T.MONTHLY_EXPENSES
+  const emergencyScore = monthsCovered >= T.EMERGENCY_FUND_MONTHS
     ? W.emergencyFund
     : clampScore(W.emergencyFund * (monthsCovered / WELLNESS_THRESHOLDS.EMERGENCY_FUND_MONTHS), W.emergencyFund)
 
@@ -132,9 +136,46 @@ export function calculateWellnessScore(assets, options = {}) {
     ? W.rebalancingAlert
     : clampScore(W.rebalancingAlert * (1 - (maxDrift - WELLNESS_THRESHOLDS.REBALANCING_DRIFT_MAX) / 0.40), W.rebalancingAlert)
 
+  // --- Factor 10: Savings Rate (income vs expenses health) ---
+  let savingsScore
+  let savingsDetail = 'No income/expense data provided'
+  let savingsStatus = 'neutral'
+  if (annualIncome !== null) {
+    const monthlyIncome = annualIncome / 12
+    const monthlySavings = monthlyIncome - monthlyExpenses
+    const savingsRatio = monthlyIncome > 0 ? monthlySavings / monthlyIncome : 0
+    // Target: save at least 20% of income
+    const TARGET_SAVINGS_RATIO = 0.20
+    if (savingsRatio >= TARGET_SAVINGS_RATIO) {
+      savingsScore = W.savingsRate
+      savingsStatus = 'pass'
+    } else if (savingsRatio > 0) {
+      savingsScore = clampScore(W.savingsRate * (savingsRatio / TARGET_SAVINGS_RATIO), W.savingsRate)
+      savingsStatus = 'fail'
+    } else {
+      savingsScore = 0
+      savingsStatus = 'fail'
+    }
+    savingsDetail = `${(savingsRatio * 100).toFixed(0)}% of income saved monthly`
+  } else {
+    // Neutral when no data — half credit
+    savingsScore = Math.round(W.savingsRate * 0.5)
+    savingsStatus = 'neutral'
+  }
+
+  // --- Goal-specific hints ---
+  const goalHints = buildGoalHints(financialGoals, {
+    hasProperty: (byCategory.PROPERTY || 0) > 0,
+    emergencyMonths: monthsCovered,
+    targetEmergencyMonths: T.EMERGENCY_FUND_MONTHS,
+    debtRatio: debtToAssetRatio,
+    incomeRatio,
+    monthlyExpenses,
+  })
+
   const score = Math.max(0, Math.min(100,
     diversificationScore + liquidityScore + cryptoScore + emergencyScore +
-    concentrationScore + growthScore + incomeScore + rebalanceScore
+    concentrationScore + growthScore + incomeScore + debtScore + rebalanceScore
   ))
 
   return {
@@ -144,81 +185,64 @@ export function calculateWellnessScore(assets, options = {}) {
         label: 'Diversification',
         score: diversificationScore,
         max: W.diversification,
-        currentValue: `Largest category: ${(maxCategoryPct * 100).toFixed(1)}%`,
-        explanation: 'Measures how evenly spread your investments are across different asset categories.',
-        whyItMatters: 'Diversification reduces risk by ensuring no single category disproportionately affects your portfolio. A concentrated portfolio is more vulnerable to market downturns in that sector.',
-        actionIfLow: maxCategoryPct > WELLNESS_THRESHOLDS.DIVERSIFICATION_MAX ? `Your ${Object.entries(byCategory).sort(([, a], [, b]) => b - a)[0][0]} holding is ${(maxCategoryPct * 100).toFixed(0)}% of your portfolio. Consider adding more assets in underrepresented categories like bonds, property, or alternative investments.` : null,
-        status: maxCategoryPct <= WELLNESS_THRESHOLDS.DIVERSIFICATION_MAX ? 'pass' : 'fail',
+        detail: `Largest category: ${(maxCategoryPct * 100).toFixed(1)}%`,
+        status: maxCategoryPct <= T.DIVERSIFICATION_MAX ? 'pass' : 'fail',
       },
       {
         label: 'Liquidity',
         score: liquidityScore,
         max: W.liquidity,
-        currentValue: `Liquid assets: ${(liquidityRatio * 100).toFixed(1)}%`,
-        explanation: 'Measures the percentage of your portfolio in liquid assets (cash, stocks, crypto) that can be quickly converted to cash.',
-        whyItMatters: 'Liquidity ensures you can handle unexpected expenses or opportunities without having to sell long-term investments at unfavorable times. It provides financial flexibility and peace of mind.',
-        actionIfLow: liquidityRatio < WELLNESS_THRESHOLDS.LIQUIDITY_TARGET ? `You have ${(liquidityRatio * 100).toFixed(0)}% in liquid assets. Consider building up cash reserves or adding more readily accessible investments to reach the ${(WELLNESS_THRESHOLDS.LIQUIDITY_TARGET * 100).toFixed(0)}% target.` : null,
-        status: liquidityRatio >= WELLNESS_THRESHOLDS.LIQUIDITY_TARGET ? 'pass' : 'fail',
+        detail: `Weighted liquidity: ${(liquidityRatio * 100).toFixed(1)}%`,
+        status: liquidityRatio >= T.LIQUIDITY_TARGET ? 'pass' : 'fail',
       },
       {
-        label: 'Crypto Exposure',
+        label: 'Volatility',
         score: cryptoScore,
         max: W.cryptoExposure,
-        currentValue: `Volatile crypto: ${(cryptoRatio * 100).toFixed(1)}%`,
-        explanation: 'Measures your exposure to high-volatility cryptocurrencies (excluding stablecoins, which are counted as cash).',
-        whyItMatters: 'While crypto offers growth potential, excessive exposure can create wild swings in your net worth. Keeping it in check protects your overall financial stability.',
-        actionIfLow: cryptoRatio > WELLNESS_THRESHOLDS.CRYPTO_MAX ? `Your crypto holdings are ${(cryptoRatio * 100).toFixed(0)}% of your portfolio. Consider trimming to the recommended ${(WELLNESS_THRESHOLDS.CRYPTO_MAX * 100).toFixed(0)}% or below to reduce volatility risk.` : null,
-        status: cryptoRatio <= WELLNESS_THRESHOLDS.CRYPTO_MAX ? 'pass' : 'fail',
+        detail: `Crypto + FOREX: ${(volatileRatio * 100).toFixed(1)}%`,
+        status: volatileRatio <= T.CRYPTO_MAX ? 'pass' : 'fail',
       },
       {
         label: 'Emergency Fund',
         score: emergencyScore,
         max: W.emergencyFund,
-        currentValue: `${monthsCovered.toFixed(1)} months covered`,
-        explanation: 'Measures how many months of living expenses your cash reserves can cover.',
-        whyItMatters: 'An emergency fund is your financial safety net. Without one, unexpected job loss or medical expenses can force you to take on debt or panic-sell investments.',
-        actionIfLow: monthsCovered < WELLNESS_THRESHOLDS.EMERGENCY_FUND_MONTHS ? `You have ${monthsCovered.toFixed(1)} months of expenses covered. Aim for ${WELLNESS_THRESHOLDS.EMERGENCY_FUND_MONTHS} months by setting aside more cash in a high-yield account.` : null,
-        status: monthsCovered >= WELLNESS_THRESHOLDS.EMERGENCY_FUND_MONTHS ? 'pass' : 'fail',
+        detail: `${monthsCovered.toFixed(1)} months covered`,
+        status: monthsCovered >= T.EMERGENCY_FUND_MONTHS ? 'pass' : 'fail',
       },
       {
         label: 'Concentration',
         score: concentrationScore,
         max: W.concentrationRisk,
-        currentValue: `Largest asset: ${(maxAssetPct * 100).toFixed(1)}%`,
-        explanation: 'Measures the percentage of your portfolio in your single largest holding.',
-        whyItMatters: 'Extreme concentration in one asset (like a single stock) exposes you to company or asset-specific risk. If that asset drops, your entire portfolio suffers.',
-        actionIfLow: maxAssetPct > WELLNESS_THRESHOLDS.SINGLE_ASSET_MAX ? `Your largest holding is ${(maxAssetPct * 100).toFixed(0)}% of your portfolio. Reduce it gradually by trimming on strength and redeploying to other investments.` : null,
-        status: maxAssetPct <= WELLNESS_THRESHOLDS.SINGLE_ASSET_MAX ? 'pass' : 'fail',
+        detail: `Largest asset: ${(maxAssetPct * 100).toFixed(1)}%`,
+        status: maxAssetPct <= T.SINGLE_ASSET_MAX ? 'pass' : 'fail',
       },
       {
         label: 'Growth Trend',
         score: growthScore,
         max: W.assetGrowthTrend,
-        currentValue: monthlyChangePct !== null ? `${monthlyChangePct >= 0 ? '+' : ''}${monthlyChangePct.toFixed(1)}% monthly` : 'No data yet',
-        explanation: 'Tracks the month-over-month change in your portfolio value.',
-        whyItMatters: 'Consistent positive growth shows your portfolio is working for you. It reflects your investment strategy, market performance, and any contributions you make.',
-        actionIfLow: monthlyChangePct !== null && monthlyChangePct < 0 ? `Your portfolio declined ${Math.abs(monthlyChangePct).toFixed(1)}% last month. Review your holdings for any that are underperforming and consider rebalancing to better-positioned assets.` : null,
+        detail: monthlyChangePct !== null ? `${monthlyChangePct >= 0 ? '+' : ''}${monthlyChangePct.toFixed(1)}% monthly` : 'No data yet',
         status: monthlyChangePct === null ? 'neutral' : monthlyChangePct >= 0 ? 'pass' : 'fail',
       },
       {
         label: 'Income Assets',
         score: incomeScore,
         max: W.incomeGenerating,
-        currentValue: `${(incomeRatio * 100).toFixed(1)}% income-generating`,
-        explanation: 'Measures the percentage of your portfolio in assets that produce income (bonds, dividend stocks, rental properties, CPF).',
-        whyItMatters: 'Income assets provide steady returns and can dramatically improve long-term wealth without requiring you to sell. They work for you during market downturns.',
-        actionIfLow: incomeRatio < WELLNESS_THRESHOLDS.INCOME_GENERATING_TARGET ? `Only ${(incomeRatio * 100).toFixed(0)}% of your portfolio generates income. Consider adding dividend stocks, bonds, or renting out property to reach ${(WELLNESS_THRESHOLDS.INCOME_GENERATING_TARGET * 100).toFixed(0)}%.` : null,
-        status: incomeRatio >= WELLNESS_THRESHOLDS.INCOME_GENERATING_TARGET ? 'pass' : 'fail',
+        detail: `${(incomeRatio * 100).toFixed(1)}% income-gen${avgYield > 0 ? ` (${(avgYield * 100).toFixed(1)}% avg yield)` : ''}`,
+        status: incomeRatio >= T.INCOME_GENERATING_TARGET ? 'pass' : 'fail',
+      },
+      {
+        label: 'Debt Health',
+        score: debtScore,
+        max: W.debtHealth,
+        detail: totalDebt > 0 ? `${(debtToAssetRatio * 100).toFixed(1)}% debt ratio` : 'No debt recorded',
+        status: debtToAssetRatio <= T.DEBT_TO_ASSET_MAX ? 'pass' : 'fail',
       },
       {
         label: 'Rebalancing',
         score: rebalanceScore,
         max: W.rebalancingAlert,
-        currentValue: `Max drift: ${(maxDrift * 100).toFixed(1)}%`,
-        explanation: 'Compares your actual allocation to target allocation and measures the largest deviation.',
-        whyItMatters: 'Over time, winning assets grow and losing ones shrink, pushing your portfolio away from your intended strategy. Rebalancing keeps you aligned with your risk goals.',
-        actionIfLow: maxDrift > WELLNESS_THRESHOLDS.REBALANCING_DRIFT_MAX ? `Your allocation has drifted ${(maxDrift * 100).toFixed(0)}% from target. Consider rebalancing by trimming winners and adding to laggards to restore your intended balance.` : null,
-        status: maxDrift <= WELLNESS_THRESHOLDS.REBALANCING_DRIFT_MAX ? 'pass' : 'fail',
+        detail: `Max drift: ${(maxDrift * 100).toFixed(1)}%`,
+        status: maxDrift <= T.REBALANCING_DRIFT_MAX ? 'pass' : 'fail',
       },
     ],
   }

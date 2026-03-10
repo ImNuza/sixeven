@@ -211,8 +211,6 @@ export default function Dashboard() {
   const [widgets, setWidgets] = useState(() => loadWidgets(user?.id))
   const [showCustomize, setShowCustomize] = useState(false)
   const [viewMode, setViewMode] = useState('client') // 'client' | 'advisor'
-  const [reviewReminderDay, setReviewReminderDay] = useState(user?.reviewReminderDay ?? null)
-  const [isSavingReviewDay, setIsSavingReviewDay] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -258,12 +256,12 @@ export default function Dashboard() {
     return () => window.removeEventListener('safeseven:onboarding', syncOnboardingProfile)
   }, [user?.id])
 
-  const { score, breakdown } = useMemo(
-    () => calculateWellnessScore(assets, { monthlyChangePct: summary?.monthlyChangePct ?? null }),
-    [assets, summary]
+  const { score, breakdown, goalHints } = useMemo(
+    () => calculateWellnessScore(assets, { monthlyChangePct: summary?.monthlyChangePct ?? null, userProfile: onboardingProfile }),
+    [assets, summary, onboardingProfile]
   )
   const healthStatus = useMemo(() => getWellnessStatus(score), [score])
-  const insights = useMemo(() => buildPortfolioInsights(assets, summary, prices), [assets, prices, summary])
+  const insights = useMemo(() => buildPortfolioInsights(assets, summary, prices, onboardingProfile), [assets, prices, summary, onboardingProfile])
 
   const pieData = useMemo(() => {
     const grouped = {}
@@ -417,7 +415,7 @@ export default function Dashboard() {
       <div className="flex items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold" style={{ color: 'var(--app-text)' }}>
-            {viewMode === 'advisor' ? 'Advisor Overview' : 'Wealth Dashboard'}
+            Wealth Dashboard
           </h1>
           {onboardingProfile?.fullName && (
             <p className="mt-1 text-sm" style={{ color: 'var(--app-text-muted)' }}>
@@ -433,26 +431,6 @@ export default function Dashboard() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {/* Client / Advisor toggle */}
-          <div className="flex items-center rounded-xl border p-1" style={{ borderColor: 'var(--app-border)', background: 'var(--app-surface)' }}>
-            {[
-              { id: 'client',  label: 'Client View',  icon: UserRound },
-              { id: 'advisor', label: 'Advisor View', icon: ShieldCheck },
-            ].map(({ id, label, icon: Icon }) => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => setViewMode(id)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-150"
-                style={viewMode === id
-                  ? { background: 'var(--app-accent)', color: '#fff' }
-                  : { color: 'var(--app-text-muted)' }}
-              >
-                <Icon className="h-3.5 w-3.5" />
-                {label}
-              </button>
-            ))}
-          </div>
           <ExportMenu onExportPDF={handleExportPDF} onExportExcel={handleExportExcel} />
           <button
             type="button"
@@ -724,18 +702,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* ── Advisor Panel ────────────────────────────────────── */}
-      {viewMode === 'advisor' && (
-        <AdvisorPanel
-          assets={assets}
-          summary={summary}
-          breakdown={breakdown}
-          score={score}
-          totalNetWorth={totalNetWorth}
-          pieData={pieData}
-          insights={insights}
-        />
-      )}
+
 
       {showCustomize && (
         <CustomizePanel widgets={widgets} onClose={() => setShowCustomize(false)} onChange={handleWidgetChange} />
@@ -935,7 +902,7 @@ function WellnessContent({ breakdown, healthStatus, score }) {
   return (
     <>
       <div className="flex items-start justify-between mb-5">
-        <SectionHeader title="Wellness Breakdown" sub="The 8 factors behind your score" />
+        <SectionHeader title="Wellness Breakdown" sub="The 10 factors behind your score" />
         <HealthRing score={score} color={healthStatus.color} size={80} />
       </div>
       <div className="space-y-3">
@@ -1059,111 +1026,6 @@ const CATEGORY_ICONS = {
 }
 
 // ── Advisor Panel ─────────────────────────────────────────────
-function AdvisorPanel({ assets, summary, breakdown, score, totalNetWorth, pieData, insights }) {
-  const { color: healthColor, label: healthLabel } = useMemo(() => {
-    if (score >= 80) return { color: '#18a871', label: 'Excellent' }
-    if (score >= 65) return { color: '#2f7cf6', label: 'Good' }
-    if (score >= 45) return { color: '#f59e0b', label: 'Fair' }
-    return { color: '#e65054', label: 'At Risk' }
-  }, [score])
-
-  // Liquidity ratio
-  const liquidCategories = new Set(['CASH', 'STOCKS', 'CRYPTO'])
-  const liquidValue = assets.filter(a => liquidCategories.has(a.category)).reduce((s, a) => s + a.value, 0)
-  const liquidPct = totalNetWorth > 0 ? ((liquidValue / totalNetWorth) * 100).toFixed(1) : '0.0'
-
-  // Concentration (largest single category %)
-  const maxCat = pieData.length > 0 ? pieData[0] : null
-  const maxCatPct = maxCat && totalNetWorth > 0 ? ((maxCat.value / totalNetWorth) * 100).toFixed(1) : '0.0'
-
-  // CPF breakdown
-  const cpfAssets = assets.filter(a => a.category === 'CPF')
-  const cpfTotal = cpfAssets.reduce((s, a) => s + a.value, 0)
-
-  // Issues from insights
-  const warnings = insights.highlights.filter(i => i.type === 'warning')
-  const positives = insights.highlights.filter(i => i.type === 'positive')
-
-  const advisorNotes = [
-    maxCatPct > 45 ? `Concentration risk: ${maxCat?.name} is ${maxCatPct}% of portfolio — consider rebalancing` : null,
-    liquidPct < 20 ? `Liquidity gap: only ${liquidPct}% in liquid assets — recommend increasing cash buffer` : null,
-    cpfTotal > 0 ? `CPF holdings: SGD ${cpfTotal.toLocaleString()} — review OA/SA/MA allocation for retirement readiness` : null,
-    score < 50 ? `Health score ${score}/100 — client needs immediate attention across multiple dimensions` : null,
-    score >= 80 ? `Portfolio is well-structured with ${healthLabel.toLowerCase()} health — focus on growth optimization` : null,
-  ].filter(Boolean)
-
-  return (
-    <div className="space-y-5">
-      {/* Risk Flags */}
-      <div className="glass-card p-6">
-        <div className="flex items-center justify-between mb-5">
-          <SectionHeader title="Advisor Dashboard" sub="Deep analytics · risk flags · discussion points" />
-          <div className="flex items-center gap-2">
-            <HealthRing score={score} color={healthColor} size={72} />
-            <div className="text-right">
-              <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: healthColor }}>{healthLabel}</p>
-              <p className="text-[11px] mt-0.5" style={{ color: 'var(--app-text-muted)' }}>Wellness score</p>
-            </div>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-3 gap-4 mb-5">
-          {[
-            { label: 'Liquidity Ratio', value: `${liquidPct}%`, ok: parseFloat(liquidPct) >= 20, hint: '≥ 20% target' },
-            { label: 'Max Concentration', value: `${maxCatPct}%`, ok: parseFloat(maxCatPct) <= 45, hint: maxCat?.name || '—' },
-            { label: 'CPF Holdings', value: cpfTotal > 0 ? `SGD ${Math.round(cpfTotal / 1000)}K` : 'None', ok: true, hint: 'Retirement account' },
-          ].map(({ label, value, ok, hint }) => (
-            <div key={label} className="rounded-2xl border px-4 py-3" style={{ borderColor: ok ? 'rgba(24,168,113,0.2)' : 'rgba(230,80,84,0.25)', background: ok ? 'rgba(24,168,113,0.04)' : 'rgba(230,80,84,0.04)' }}>
-              <p className="text-[11px] font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--app-text-muted)' }}>{label}</p>
-              <p className="text-xl font-semibold" style={{ color: ok ? '#18a871' : '#e65054' }}>{value}</p>
-              <p className="text-[11px] mt-0.5" style={{ color: 'var(--app-text-muted)' }}>{hint}</p>
-            </div>
-          ))}
-        </div>
-
-        {/* 8-factor detail */}
-        <div className="grid grid-cols-2 gap-3">
-          {breakdown.map(item => (
-            <div key={item.label} className="rounded-xl px-3 py-2.5" style={{ background: 'rgba(255,255,255,0.03)' }}>
-              <div className="flex items-center justify-between mb-1.5">
-                <span className="text-xs font-medium" style={{ color: 'var(--app-text-soft)' }}>{item.label}</span>
-                <span className={`text-xs font-semibold px-1.5 py-0.5 rounded-full ${item.status === 'pass' ? 'bg-emerald-400/10 text-emerald-400' : item.status === 'neutral' ? 'bg-blue-400/10 text-blue-400' : 'bg-red-400/10 text-red-400'}`}>
-                  {item.score}/{item.max}
-                </span>
-              </div>
-              <div className="h-1 rounded-full bg-white/[0.06] overflow-hidden">
-                <div className="h-full rounded-full" style={{ width: `${(item.score / item.max) * 100}%`, backgroundColor: item.status === 'pass' ? '#18a871' : item.status === 'neutral' ? '#2f7cf6' : '#e65054' }} />
-              </div>
-              <p className="text-[10px] mt-1" style={{ color: 'var(--app-text-muted)' }}>{item.detail}</p>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Advisor Notes */}
-      {advisorNotes.length > 0 && (
-        <div className="glass-card p-6">
-          <SectionHeader title="Advisor Notes" sub="Discussion points and action items for this client" />
-          <div className="mt-4 space-y-2">
-            {advisorNotes.map((note, i) => (
-              <div key={i} className="flex items-start gap-3 rounded-xl border border-yellow-400/15 bg-yellow-400/[0.04] px-3.5 py-3">
-                <AlertTriangle className="h-4 w-4 text-yellow-400 flex-shrink-0 mt-0.5" />
-                <p className="text-sm" style={{ color: 'var(--app-text-soft)' }}>{note}</p>
-              </div>
-            ))}
-            {positives.slice(0, 2).map((insight) => (
-              <div key={insight.title} className="flex items-start gap-3 rounded-xl border border-emerald-400/15 bg-emerald-400/[0.04] px-3.5 py-3">
-                <CheckCircle className="h-4 w-4 text-emerald-400 flex-shrink-0 mt-0.5" />
-                <p className="text-sm" style={{ color: 'var(--app-text-soft)' }}>{insight.title} — {insight.message}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
 function KpiCard({ label, value, sub, positive, valueClass, glow, scoreColor, icon }) {
   const isNeutral = positive === undefined && !scoreColor
   return (
