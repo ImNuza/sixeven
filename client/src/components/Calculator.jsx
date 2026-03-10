@@ -221,12 +221,24 @@ function StocksForm({ state, set }) {
 const CPF_RATES = { OA: 0.025, SA: 0.04, MA: 0.04 }
 
 function CPFForm({ state, set }) {
-  const oa = parseFloat(state.oa) || 0
-  const sa = parseFloat(state.sa) || 0
-  const ma = parseFloat(state.ma) || 0
-  const total = oa + sa + ma
+  const balance = parseFloat(state.balance) || 0
+  const accountType = state.accountType || 'OA'
   const FRS = 213000
-  const saProgress = Math.min(100, (sa / FRS) * 100)
+  const saProgress = accountType === 'SA' ? Math.min(100, (balance / FRS) * 100) : 0
+
+  const accountLabels = {
+    OA: 'Ordinary Account (OA)',
+    SA: 'Special Account (SA)',
+    MA: 'Medisave Account (MA)',
+    RA: 'Retirement Account (RA)',
+  }
+
+  const interestRates = {
+    OA: '2.5% p.a.',
+    SA: '4% p.a.',
+    MA: '4% p.a.',
+    RA: '4% p.a.',
+  }
 
   return (
     <div className="space-y-4">
@@ -234,28 +246,20 @@ function CPFForm({ state, set }) {
         CPF balances earn guaranteed interest: OA 2.5% p.a., SA & MA 4% p.a. Your CPF is counted as an asset at current balance.
       </p>
       <Field label="Account Type">
-        <Select value={state.accountType || 'OA'} onChange={v => set({ ...state, accountType: v })}>
+        <Select value={accountType} onChange={v => set({ ...state, accountType: v })}>
           <option value="OA">Ordinary Account (OA)</option>
           <option value="SA">Special Account (SA)</option>
           <option value="MA">Medisave Account (MA)</option>
           <option value="RA">Retirement Account (RA)</option>
         </Select>
       </Field>
-      <div className="grid grid-cols-3 gap-4">
-        <Field label="Ordinary (OA)">
-          <Input type="number" step="0.01" min="0" value={state.oa} onChange={v => set({ ...state, oa: v })} placeholder="0" />
-        </Field>
-        <Field label="Special (SA)">
-          <Input type="number" step="0.01" min="0" value={state.sa} onChange={v => set({ ...state, sa: v })} placeholder="0" />
-        </Field>
-        <Field label="Medisave (MA)">
-          <Input type="number" step="0.01" min="0" value={state.ma} onChange={v => set({ ...state, ma: v })} placeholder="0" />
-        </Field>
-      </div>
+      <Field label={`${accountLabels[accountType]} Balance`} hint={`Interest: ${interestRates[accountType]}`}>
+        <Input type="number" step="100" min="0" value={state.balance} onChange={v => set({ ...state, balance: v })} placeholder="e.g. 50000" />
+      </Field>
       <Field label="Monthly Contribution (optional)" hint="For future planning">
         <Input type="number" step="1" min="0" value={state.monthly} onChange={v => set({ ...state, monthly: v })} placeholder="e.g. 1850" />
       </Field>
-      {total > 0 && (
+      {balance > 0 && accountType === 'SA' && (
         <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-4 space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-xs text-white/40">SA vs Full Retirement Sum (S${(FRS / 1000).toFixed(0)}k)</span>
@@ -264,12 +268,12 @@ function CPFForm({ state, set }) {
           <div className="h-1.5 rounded-full bg-white/[0.06]">
             <div className="h-full rounded-full bg-cyan-400/60" style={{ width: `${saProgress}%` }} />
           </div>
-          {sa < FRS && (
-            <p className="text-xs text-amber-400">SA shortfall vs FRS: {formatSGD(FRS - sa)} — consider voluntary top-ups.</p>
+          {balance < FRS && (
+            <p className="text-xs text-amber-400">SA shortfall vs FRS: {formatSGD(FRS - balance)} — consider voluntary top-ups.</p>
           )}
         </div>
       )}
-      <PreviewResult value={total} label="Total CPF Balance (SGD)" />
+      <PreviewResult value={balance} label={`Total ${accountType} Balance (SGD)`} />
     </div>
   )
 }
@@ -654,7 +658,7 @@ export default function AddAssetModal({ onClose }) {
   // Per-tab form states
   const [cash, setCash] = useState({ institution: '', accountType: 'Savings', balance: '', currency: 'SGD', fxRate: '1' })
   const [stocks, setStocks] = useState({ ticker: '', name: '', quantity: '', priceSgd: '', currency: 'USD', fxRate: '1.35', brokerage: '', purchaseDate: today, costBasis: '' })
-  const [cpf, setCpf] = useState({ accountType: 'OA', oa: '', sa: '', ma: '', monthly: '' })
+  const [cpf, setCpf] = useState({ accountType: 'OA', balance: '', monthly: '' })
   const [property, setProperty] = useState({ propertyType: 'HDB Flat', postcode: '', address: '', marketValue: '', outstandingLoan: '', cpfUsed: '', rooms: '', floorLevel: '' })
   const [crypto, setCrypto] = useState({ symbol: '', quantity: '', priceSgd: '', exchange: '' })
   const [other, setOther] = useState({ name: '', category: 'OTHER', value: '', liquidity: 'Medium', notes: '' })
@@ -698,13 +702,13 @@ export default function AddAssetModal({ onClose }) {
         }
       }
       case 'cpf': {
-        const value = (parseFloat(cpf.oa) || 0) + (parseFloat(cpf.sa) || 0) + (parseFloat(cpf.ma) || 0)
+        const value = parseFloat(cpf.balance) || 0
         return {
           estimatedValue: value, category: 'CPF', liquidity: 'Illiquid',
           buildPayload: () => ({
             name: 'CPF', category: 'CPF', value, cost: value, date: today,
             institution: 'CPF Board',
-            details: { accountType: cpf.accountType || 'OA', oa: parseFloat(cpf.oa) || 0, sa: parseFloat(cpf.sa) || 0, ma: parseFloat(cpf.ma) || 0, monthlyContribution: parseFloat(cpf.monthly) || 0 },
+            details: { accountType: cpf.accountType || 'OA', balance: value, monthlyContribution: parseFloat(cpf.monthly) || 0 },
           }),
         }
       }

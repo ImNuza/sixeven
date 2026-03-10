@@ -91,14 +91,71 @@ export const WELLNESS_THRESHOLDS = {
 }
 
 export const WELLNESS_WEIGHTS = {
-  diversification: 15,
-  liquidity: 15,
-  cryptoExposure: 10,
-  emergencyFund: 15,
-  concentrationRisk: 15,
-  assetGrowthTrend: 10,
-  incomeGenerating: 10,
-  rebalancingAlert: 10,
+  diversification: 11,
+  liquidity: 11,
+  cryptoExposure: 9,
+  emergencyFund: 11,
+  concentrationRisk: 11,
+  assetGrowthTrend: 9,
+  incomeGenerating: 9,
+  debtHealth: 11,
+  rebalancingAlert: 9,
+  savingsRate: 9,                   // Income vs expenses health
+}
+
+/**
+ * Parse a monthly-expenses range string into a numeric midpoint (monthly SGD).
+ * Returns null when the range is not recognised so callers can fall back to defaults.
+ */
+export function parseMonthlyExpenses(range) {
+  if (!range) return null
+  const map = {
+    'Below S$2,000': 1500,
+    'S$2,000 - S$4,000': 3000,
+    'S$4,001 - S$7,000': 5500,
+    'S$7,001 - S$10,000': 8500,
+    'Above S$10,000': 12000,
+  }
+  return map[range] ?? null
+}
+
+/**
+ * Parse an annual-income range string into a numeric midpoint (annual SGD).
+ */
+export function parseAnnualIncome(range) {
+  if (!range) return null
+  const map = {
+    'Below S$30,000': 24000,
+    'S$30,000 - S$60,000': 45000,
+    'S$60,001 - S$100,000': 80000,
+    'S$100,001 - S$180,000': 140000,
+    'Above S$180,000': 220000,
+  }
+  return map[range] ?? null
+}
+
+/**
+ * Return a copy of WELLNESS_THRESHOLDS adjusted for the user's risk appetite.
+ * Conservative → tighter limits, bigger safety buffers.
+ * Aggressive   → wider risk tolerance, smaller safety buffers.
+ * Moderate / unknown → unchanged defaults.
+ */
+export function getRiskAdjustedThresholds(riskAppetite) {
+  const t = { ...WELLNESS_THRESHOLDS }
+  if (riskAppetite === 'Conservative') {
+    t.CRYPTO_MAX = 0.15
+    t.DIVERSIFICATION_MAX = 0.35
+    t.SINGLE_ASSET_MAX = 0.20
+    t.EMERGENCY_FUND_MONTHS = 9
+    t.DEBT_TO_ASSET_MAX = 0.35
+  } else if (riskAppetite === 'Aggressive') {
+    t.CRYPTO_MAX = 0.40
+    t.DIVERSIFICATION_MAX = 0.50
+    t.SINGLE_ASSET_MAX = 0.35
+    t.EMERGENCY_FUND_MONTHS = 3
+    t.DEBT_TO_ASSET_MAX = 0.60
+  }
+  return t
 }
 
 export const TARGET_ALLOCATION = {
@@ -110,4 +167,27 @@ export const TARGET_ALLOCATION = {
   BONDS: 0.10,
   FOREX: 0.02,
   OTHER: 0.03,
+}
+
+// ── Projection assumptions for What-If scenario engine ───────────
+export const PROJECTION_ASSUMPTIONS = {
+  ANNUAL_RETURNS: {
+    CASH: 0.02,       // savings account interest
+    STOCKS: 0.07,     // long-term equity average
+    CRYPTO: 0.00,     // too volatile to assume growth
+    PROPERTY: 0.03,   // Singapore property appreciation
+    CPF: 0.035,       // weighted average CPF interest
+    BONDS: 0.035,     // Singapore T-bill / SSB average
+    FOREX: 0.00,      // no assumed return
+    OTHER: 0.00,      // no assumed return
+  },
+  INFLATION_RATE: 0.03,
+}
+
+// Estimated BTO prices by flat type (Singapore, 2025/2026 ranges)
+export const BTO_PRICES = {
+  '2-Room Flexi': 100000,
+  '3-Room': 200000,
+  '4-Room': 350000,
+  '5-Room': 450000,
 }

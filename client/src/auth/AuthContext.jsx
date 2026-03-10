@@ -14,12 +14,14 @@ import {
 const AuthContext = createContext(null)
 
 export function AuthProvider({ children }) {
+  const storedSession = loadStoredSession()
+
   // Hydrate from localStorage for instant display (user object only — no token)
   const [session, setSession] = useState(() => {
-    const stored = loadStoredSession()
-    return stored?.user ? stored : null
+    return storedSession?.user ? storedSession : null
   })
-  const [isReady, setIsReady] = useState(false)
+  // If nothing is stored locally, do not block initial render on network restore.
+  const [isReady, setIsReady] = useState(() => !storedSession?.user)
 
   useEffect(() => {
     let cancelled = false

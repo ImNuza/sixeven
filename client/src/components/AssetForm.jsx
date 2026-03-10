@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { ASSET_CATEGORIES } from '../../../shared/constants.js'
 import { CATEGORY_DETAIL_CONFIG, normalizeDetails, validateCategoryDetails } from '../data/assetDetails.js'
 
-const PRICED_CATEGORIES = new Set(['STOCKS', 'CRYPTO'])
+const PRICED_CATEGORIES = new Set(['STOCKS'])
 
 const emptyForm = {
   name: '',
@@ -186,7 +186,7 @@ export default function AssetForm({
             value={values.ticker}
             onChange={updateField}
             className="app-input mt-2 text-sm"
-            placeholder={isPricedAsset ? 'AAPL or bitcoin' : 'Optional for manual assets'}
+            placeholder={isPricedAsset ? 'AAPL' : 'Optional for manual assets'}
           />
         </label>
 
@@ -345,7 +345,7 @@ export default function AssetForm({
       <div className="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3 text-sm text-white/55">
         {isPricedAsset
           ? 'Live-priced assets use the backend price service. If you leave Initial Value empty, SafeSeven will use Cost Basis until the next refresh.'
-          : 'Manual-value assets keep the value you enter until you edit them again.'}
+          : 'Manual-value assets keep the value you enter until you edit them again. Crypto assets are currently manual-value only.'}
       </div>
 
       {(validationError || submitError) && (
