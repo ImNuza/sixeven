@@ -14,6 +14,7 @@ import {
   lookupPropertyByPostcode,
   saveOnboardingDemoLinks,
   saveWalletConnection,
+  triggerWalletSync,
   updateProfile,
 } from '../services/api.js'
 import { useAuth } from '../auth/AuthContext.jsx'
@@ -124,7 +125,6 @@ const STEPS = [
   'investments',
   'property',
   'debts',
-  'wallets',
   'integrations',
   'consent',
 ]
@@ -440,6 +440,7 @@ export default function Onboarding() {
     moomooError: '',
     walletSaving: false,
     walletSaved: 0,
+    walletError: '',
   })
 
   const step = STEPS[stepIndex]
@@ -543,15 +544,51 @@ export default function Onboarding() {
 
   async function handleSaveWallets() {
     const addresses = parseWalletAddresses(values.walletAddresses).filter((address) => /^0x[0-9a-fA-F]{40}$/.test(address))
-    setIntegrationState((current) => ({ ...current, walletSaving: true }))
+    console.log('[Onboarding] handleSaveWallets - parsed addresses:', addresses)
+    
+    if (addresses.length === 0) {
+      console.warn('[Onboarding] No valid wallet addresses to save')
+      setIntegrationState((current) => ({ ...current, walletError: 'Please enter at least one valid wallet address (0x...)', walletSaved: 0 }))
+      return
+    }
+    
+    setIntegrationState((current) => ({ ...current, walletSaving: true, walletError: '' }))
     try {
+      console.log('[Onboarding] Saving', addresses.length, 'wallet address(es)...')
       for (const address of addresses) {
+        console.log('[Onboarding] Saving wallet:', address)
         await saveWalletConnection(address, 1, 'Onboarding Wallet')
+        console.log('[Onboarding] ✓ Wallet saved:', address)
       }
-      setIntegrationState((current) => ({ ...current, walletSaving: false, walletSaved: addresses.length }))
+      
+      // Auto-sync wallet portfolio to create crypto assets
+      try {
+        console.log('[Onboarding] Triggering automatic wallet sync...')
+        const syncResult = await triggerWalletSync()
+        console.log('[Onboarding] Wallet sync completed:', syncResult)
+        setIntegrationState((current) => ({ 
+          ...current, 
+          walletSaving: false, 
+          walletSaved: addresses.length,
+          walletError: '',
+        }))
+      } catch (syncErr) {
+        // Log the sync error but don't fail - wallet addresses are still saved
+        console.warn('[Onboarding] Wallet auto-sync failed (non-blocking):', syncErr.message)
+        setIntegrationState((current) => ({ 
+          ...current, 
+          walletSaving: false, 
+          walletSaved: addresses.length,
+          walletError: 'Addresses saved, but automatic sync failed. You can sync manually later.',
+        }))
+      }
     } catch (err) {
-      setIntegrationState((current) => ({ ...current, walletSaving: false }))
-      setError(err.message || 'Wallet save failed.')
+      console.error('[Onboarding] Wallet save error:', err)
+      setIntegrationState((current) => ({ 
+        ...current, 
+        walletSaving: false, 
+        walletError: err.message || 'Failed to save wallet address. Please try again.' 
+      }))
     }
   }
 
@@ -903,22 +940,6 @@ export default function Onboarding() {
             </div>
           </StepShell>
         )
-      case 'wallets':
-        return (
-          <StepShell step={stepIndex} total={totalProgressSteps} title="Would you like to specify your wallet addresses?" description="Paste one or more EVM wallet addresses. We will save valid addresses and show them in your dashboard and connected accounts.">
-            <div style={{ display: 'grid', gap: '1rem' }}>
-              <textarea value={values.walletAddresses} onChange={(event) => setField('walletAddresses', event.target.value)} placeholder="One 0x address per line" rows={4} style={{ ...inputStyle(), minHeight: 120 }} />
-              <input value={values.otherWalletNotes} onChange={(event) => setField('otherWalletNotes', event.target.value)} placeholder="Optional: note any non-EVM wallets or custodians" style={inputStyle()} />
-              <button type="button" onClick={handleSaveWallets} disabled={integrationState.walletSaving} style={buttonStyle(false)}>
-                {integrationState.walletSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <WalletCards className="h-4 w-4" />}
-                Save wallet addresses
-              </button>
-              {integrationState.walletSaved > 0 && (
-                <p style={{ color: '#86efac', fontSize: '0.9rem' }}>{integrationState.walletSaved} wallet address{integrationState.walletSaved > 1 ? 'es' : ''} saved.</p>
-              )}
-            </div>
-          </StepShell>
-        )
       case 'integrations':
         return (
           <StepShell step={stepIndex} total={totalProgressSteps} title="Optional account connections and imports" description="You can connect Singpass and link your accounts now, or do it later from Account.">
@@ -971,36 +992,19 @@ export default function Onboarding() {
               </div>
 
               <div style={{ border: '1px solid rgba(255,255,255,0.1)', borderRadius: '1rem', padding: '1rem', background: 'rgba(255,255,255,0.03)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', marginBottom: '0.8rem' }}>
-                  <WalletCards className="h-4 w-4" style={{ color: '#a78bfa' }} />
-                  <strong>Crypto Wallet</strong>
-                </div>
-                <p style={{ color: 'rgba(255,255,255,0.52)', marginBottom: '0.8rem' }}>
-                  Link your wallet to track your cryptocurrency holdings across blockchains.
-                </p>
-                <button 
-                  type="button" 
-                  onClick={() => setField('useDemoCryptoWallet', !values.useDemoCryptoWallet)}
-                  style={{
-                    ...buttonStyle(values.useDemoCryptoWallet ? true : false),
-                    width: '100%',
-                    justifyContent: 'center',
-                  }}
-                >
-                  {values.useDemoCryptoWallet ? (
-                    <>
-                      <CheckCircle2 className="h-4 w-4" style={{ color: '#86efac' }} />
-                      Wallet connected
-                    </>
-                  ) : (
-                    <>
-                      <WalletCards className="h-4 w-4" />
-                      Connect wallet
-                    </>
-                  )}
+                <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: '0.8rem' }}>Would you like to specify your wallet addresses?</h3>
+                <p style={{ color: 'rgba(255,255,255,0.52)', marginBottom: '1rem', fontSize: '0.9rem' }}>Paste one or more EVM wallet addresses. We will save valid addresses and show them in your dashboard and connected accounts.</p>
+                <textarea value={values.walletAddresses} onChange={(event) => setField('walletAddresses', event.target.value)} placeholder="One 0x address per line" rows={4} style={{ ...inputStyle(), minHeight: 120 }} />
+                <input value={values.otherWalletNotes} onChange={(event) => setField('otherWalletNotes', event.target.value)} placeholder="Optional: note any non-EVM wallets or custodians" style={inputStyle()} />
+                <button type="button" onClick={handleSaveWallets} disabled={integrationState.walletSaving} style={buttonStyle(false)}>
+                  {integrationState.walletSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <WalletCards className="h-4 w-4" />}
+                  Save wallet addresses
                 </button>
-                {values.useDemoCryptoWallet && (
-                  <p style={{ color: '#86efac', marginTop: '0.6rem', fontSize: '0.875rem' }}>✓ Crypto wallet linked and ready to sync</p>
+                {integrationState.walletError && (
+                  <p style={{ color: '#ef4444', fontSize: '0.9rem', marginTop: '0.5rem' }}>✗ {integrationState.walletError}</p>
+                )}
+                {integrationState.walletSaved > 0 && !integrationState.walletError && (
+                  <p style={{ color: '#86efac', fontSize: '0.9rem' }}>✓ {integrationState.walletSaved} wallet address{integrationState.walletSaved > 1 ? 'es' : ''} saved.</p>
                 )}
               </div>
             </div>

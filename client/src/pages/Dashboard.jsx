@@ -18,7 +18,7 @@ import {
 import { CSS } from '@dnd-kit/utilities'
 import { ASSET_CATEGORIES, CATEGORY_COLORS } from '../../../shared/constants.js'
 import { calculateWellnessScore, getWellnessStatus } from '../data/wellnessCalculator.js'
-import { fetchDashboardData, refreshPrices } from '../services/api.js'
+import { fetchDashboardData, refreshPrices, triggerWalletSync } from '../services/api.js'
 import { buildPortfolioInsights } from '../data/portfolioInsights.js'
 import ExportMenu from '../components/ExportMenu'
 import { exportDashboardPDF, exportDashboardExcel } from '../utils/exportReport'
@@ -199,6 +199,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [isRefreshing, setIsRefreshing] = useState(false)
+  const [isSyncingWallets, setIsSyncingWallets] = useState(false)
   const [activeRange, setActiveRange] = useState('ALL')
   const [widgets, setWidgets] = useState(() => loadWidgets(user?.id))
   const [showCustomize, setShowCustomize] = useState(false)
@@ -318,6 +319,33 @@ export default function Dashboard() {
     }
   }
 
+  async function handleSyncWallets() {
+    try {
+      setIsSyncingWallets(true)
+      setError('')
+      const result = await triggerWalletSync()
+      
+      // Refresh dashboard to show newly synced assets
+      const data = await fetchDashboardData()
+      setAssets(data.assets)
+      setSummary(data.summary)
+      setHistory(data.history)
+      setPrices(data.prices)
+      
+      notify({
+        type: 'success',
+        title: 'Wallet sync complete',
+        message: `${result.created || 0} assets created, ${result.updated || 0} updated.`
+      })
+    } catch (err) {
+      const errorMsg = err.message || 'Failed to sync wallet assets.'
+      setError(errorMsg)
+      notify({ type: 'error', title: 'Wallet sync failed', message: errorMsg })
+    } finally {
+      setIsSyncingWallets(false)
+    }
+  }
+
   function handleWidgetChange(newWidgets) {
     setWidgets(newWidgets)
     saveWidgets(newWidgets, user?.id)
@@ -409,6 +437,18 @@ export default function Dashboard() {
             <Settings2 className="h-4 w-4" />
             Customize
           </button>
+          {onboardingWallets.length > 0 && (
+            <button
+              type="button"
+              onClick={handleSyncWallets}
+              disabled={isSyncingWallets}
+              className="app-button-secondary inline-flex items-center gap-2 px-4 py-2.5 text-sm disabled:opacity-50"
+              title="Sync crypto assets from connected wallets"
+            >
+              <Coins className={`h-3.5 w-3.5 ${isSyncingWallets ? 'animate-spin' : ''}`} />
+              {isSyncingWallets ? 'Syncing…' : 'Sync Wallets'}
+            </button>
+          )}
           <button
             type="button"
             onClick={handleManualRefresh}

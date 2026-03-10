@@ -234,6 +234,14 @@ export async function fetchWalletPortfolio(address) {
   return request(`/api/wallet/portfolio?address=${encodeURIComponent(address)}`)
 }
 
+export async function triggerWalletSync() {
+  return request('/api/wallet/sync', { method: 'POST' })
+}
+
+export async function fetchWalletSyncStatus() {
+  return request('/api/wallet/sync-status')
+}
+
 // ── CEX (Coinbase) ─────────────────────────────────────────────
 export async function fetchCoinbaseBalances(apiKey, apiSecret) {
   return request('/api/cex/coinbase/balances', {

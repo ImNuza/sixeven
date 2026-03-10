@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+did u #!/usr/bin/env node
 /**
  * Diagnostic script to test the dashboard API flow
  */

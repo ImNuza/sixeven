@@ -1472,6 +1472,68 @@ HARD RULES:
     }
   })
 
+  // ── Auto-sync wallet addresses to assets ──────────────────────
+  // Fetches portfolio data from all connected wallets and creates/updates crypto assets
+  app.post('/api/wallet/sync', requireAuth, async (req, res) => {
+    try {
+      const { performFullWalletSync } = await import('./services/walletSyncService.js')
+      const result = await performFullWalletSync(pool, req.user.id, recordNetWorthSnapshot)
+      
+      if (!result.success) {
+        return res.status(503).json({ 
+          error: result.error || 'Wallet sync failed',
+          message: 'Ensure Zerion API is configured and wallet addresses are connected'
+        })
+      }
+
+      res.json({
+        success: true,
+        created: result.created,
+        updated: result.updated,
+        totalTokensProcessed: result.totalTokensProcessed,
+        walletFailures: result.walletFailures || [],
+        assetErrors: result.assetErrors || [],
+      })
+    } catch (err) {
+      console.error('[WalletSync] Endpoint error:', err)
+      res.status(500).json({ error: err.message })
+    }
+  })
+
+  // ── Get wallet sync status ─────────────────────────────────────
+  app.get('/api/wallet/sync-status', requireAuth, async (req, res) => {
+    try {
+      // Return list of auto-synced assets for the user
+      const { rows } = await pool.query(
+        `SELECT id, ticker, name, quantity, value, date, details
+         FROM assets 
+         WHERE user_id = $1 
+         AND category = 'Crypto'
+         AND json_extract(details, '$.source') = 'wallet-auto-sync'
+         ORDER BY date DESC`,
+        [req.user.id]
+      )
+      
+      const syncedAssets = rows.map(row => ({
+        id: row.id,
+        symbol: row.ticker,
+        name: row.name,
+        balance: row.quantity,
+        valueUsd: row.value,
+        lastUpdated: row.date,
+        details: typeof row.details === 'string' ? JSON.parse(row.details) : row.details,
+      }))
+
+      res.json({
+        totalSyncedAssets: syncedAssets.length,
+        totalValue: syncedAssets.reduce((sum, a) => sum + (a.valueUsd || 0), 0),
+        assets: syncedAssets,
+      })
+    } catch (err) {
+      res.status(500).json({ error: err.message })
+    }
+  })
+
   // ── Moomoo Singapore (Futu OpenAPI via OpenD) ─────────────────
   app.post('/api/moomoo/positions', requireAuth, async (req, res) => {
     const { openDUrl } = req.body
