@@ -10,19 +10,26 @@ import { encrypt, decrypt, encryptJSON, decryptJSON } from '../services/encrypti
 // institution — could reveal bank/broker relationships
 // details     — JSONB with account numbers, notes, custom metadata
 function encryptAsset(asset) {
+  const encDetails = encryptJSON(asset.details)
   return {
     ...asset,
     institution: encrypt(asset.institution),
-    details: encryptJSON(asset.details),
+    // Stringify so SQLite TEXT columns receive a string, not a JS object
+    details: encDetails != null ? JSON.stringify(encDetails) : null,
   }
 }
 
 function decryptAsset(row) {
   if (!row) return row
+  // SQLite stores details as a JSON string; parse before decrypting
+  let details = row.details
+  if (typeof details === 'string') {
+    try { details = JSON.parse(details) } catch { /* use as-is */ }
+  }
   return {
     ...row,
     institution: decrypt(row.institution),
-    details: decryptJSON(row.details),
+    details: decryptJSON(details),
   }
 }
 

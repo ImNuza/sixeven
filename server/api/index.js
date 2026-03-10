@@ -1,10 +1,10 @@
-import '../server/env.js'
-import { pool } from '../server/db.js'
-import { runMigrations } from '../server/db/migrations.js'
-import { ensureFreshPrices, refreshAllPrices, refreshUserPrices } from '../server/services/priceService.js'
-import { getPortfolioHistory, getPortfolioSummary, recordNetWorthSnapshot } from '../server/services/portfolioService.js'
-import { authenticateAccount, changePassword, createUserAccount, deleteAccount, getUserById, updateProfile } from '../server/services/accountService.js'
-import { createApp } from '../server/app.js'
+import '../env.js'
+import { pool } from '../db.js'
+import { runMigrations } from '../db/migrations.js'
+import { ensureFreshPrices, refreshAllPrices, refreshUserPrices } from '../services/priceService.js'
+import { getPortfolioHistory, getPortfolioSummary, recordNetWorthSnapshot } from '../services/portfolioService.js'
+import { authenticateAccount, changePassword, createUserAccount, deleteAccount, getUserById, updateProfile } from '../services/accountService.js'
+import { createApp } from '../app.js'
 
 const app = createApp({
   pool,
