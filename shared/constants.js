@@ -111,3 +111,26 @@ export const TARGET_ALLOCATION = {
   FOREX: 0.02,
   OTHER: 0.03,
 }
+
+// ── Projection assumptions for What-If scenario engine ───────────
+export const PROJECTION_ASSUMPTIONS = {
+  ANNUAL_RETURNS: {
+    CASH: 0.02,       // savings account interest
+    STOCKS: 0.07,     // long-term equity average
+    CRYPTO: 0.00,     // too volatile to assume growth
+    PROPERTY: 0.03,   // Singapore property appreciation
+    CPF: 0.035,       // weighted average CPF interest
+    BONDS: 0.035,     // Singapore T-bill / SSB average
+    FOREX: 0.00,      // no assumed return
+    OTHER: 0.00,      // no assumed return
+  },
+  INFLATION_RATE: 0.03,
+}
+
+// Estimated BTO prices by flat type (Singapore, 2025/2026 ranges)
+export const BTO_PRICES = {
+  '2-Room Flexi': 100000,
+  '3-Room': 200000,
+  '4-Room': 350000,
+  '5-Room': 450000,
+}
