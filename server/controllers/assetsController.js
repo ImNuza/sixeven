@@ -51,17 +51,30 @@ export function createAssetsController({ pool, recordNetWorthSnapshot }) {
       try {
         const filters = parseAssetListQuery(req.query)
         const { whereClause, params } = buildAssetListQueryParts(filters)
-        const scopedWhereClause = prependUserFilter(whereClause)
         const queryParams = [req.user.id, ...params]
+        
+        // Adjust parameter indices in the WHERE clause by 1 (since user_id is $1)
+        let adjustedWhereClause = whereClause
+        if (whereClause && whereClause !== 'WHERE ') {
+          for (let i = params.length; i >= 1; i--) {
+            // Replace $N with $(N+1) in reverse order to avoid replacing $1 when looking for $10
+            adjustedWhereClause = adjustedWhereClause.replace(new RegExp(`\\$${i}\\b`, 'g'), `$${i + 1}`)
+          }
+          // Add user_id filter
+          adjustedWhereClause = adjustedWhereClause.replace('WHERE ', 'WHERE user_id = $1 AND ')
+        } else {
+          adjustedWhereClause = 'WHERE user_id = $1'
+        }
+        
         const orderClause = buildAssetOrderClause(filters.sortBy, filters.sortDirection)
         const offset = (filters.page - 1) * filters.pageSize
 
         const countResult = await pool.query(
-          `SELECT COUNT(*) AS total FROM assets ${scopedWhereClause}`,
+          `SELECT COUNT(*) AS total FROM assets ${adjustedWhereClause}`,
           queryParams
         )
         const rowsResult = await pool.query(
-          `SELECT * FROM assets ${scopedWhereClause} ${orderClause} LIMIT $${queryParams.length + 1} OFFSET $${queryParams.length + 2}`,
+          `SELECT * FROM assets ${adjustedWhereClause} ${orderClause} LIMIT $${queryParams.length + 1} OFFSET $${queryParams.length + 2}`,
           [...queryParams, filters.pageSize, offset]
         )
 

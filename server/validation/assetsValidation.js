@@ -106,6 +106,8 @@ export function parseAssetListQuery(query = {}) {
   const search = String(query.search || '').trim()
   const category = String(query.category || 'ALL').toUpperCase()
   const pricing = String(query.pricing || 'ALL').toUpperCase()
+  const dateFrom = String(query.dateFrom || '').trim()
+  const dateTo = String(query.dateTo || '').trim()
   const sortBy = normalizeSortBy(query.sortBy)
   const sortDirection = String(query.sortDirection || 'desc').toLowerCase() === 'asc' ? 'ASC' : 'DESC'
 
@@ -115,6 +117,8 @@ export function parseAssetListQuery(query = {}) {
     search,
     category: category === 'ALL' ? 'ALL' : category,
     pricing: ['ALL', 'LIVE', 'MANUAL'].includes(pricing) ? pricing : 'ALL',
+    dateFrom,
+    dateTo,
     sortBy,
     sortDirection,
   }
@@ -124,20 +128,29 @@ export function buildAssetListQueryParts(filters) {
   const conditions = []
   const params = []
 
+  if (filters.dateFrom) {
+    params.push(filters.dateFrom)
+    conditions.push(`date >= $${params.length + 1}`)
+  }
+
+  if (filters.dateTo) {
+    params.push(filters.dateTo)
+    conditions.push(`date <= $${params.length + 1}`)
+  }
+
   if (filters.search) {
     params.push(`%${filters.search}%`)
-    const index = params.length
+    const index = params.length + 1
     conditions.push(`(
       name ILIKE $${index}
       OR COALESCE(ticker, '') ILIKE $${index}
-      OR COALESCE(institution, '') ILIKE $${index}
-      OR COALESCE(details::text, '') ILIKE $${index}
+      OR category ILIKE $${index}
     )`)
   }
 
   if (filters.category !== 'ALL') {
     params.push(filters.category)
-    conditions.push(`category = $${params.length}`)
+    conditions.push(`category = $${params.length + 1}`)
   }
 
   if (filters.pricing === 'LIVE') {
@@ -169,10 +182,10 @@ export function buildAssetOrderClause(sortBy, sortDirection) {
 }
 
 function normalizeSortBy(sortBy) {
-  const value = String(sortBy || 'value').toLowerCase()
+  const value = String(sortBy || 'date').toLowerCase()
   return ['asset', 'category', 'value', 'cost', 'pnl', 'date'].includes(value)
     ? value
-    : 'value'
+    : 'date'
 }
 
 function clampInt(value, fallback, min, max = Number.MAX_SAFE_INTEGER) {

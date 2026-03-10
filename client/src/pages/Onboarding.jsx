@@ -1057,7 +1057,7 @@ export default function Onboarding() {
             Estimated assets captured: {formatCurrency(onboardingProfile.estimatedNetWorthTracked)}
           </p>
           <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', justifyContent: 'center' }}>
-            <button type="button" onClick={() => { console.log('[Onboarding] Navigating to assets with refresh flag'); setTimeout(() => navigate('/assets?refresh=true', { replace: true }), 500) }} style={buttonStyle(true)}>
+            <button type="button" onClick={() => { console.log('[Onboarding] Navigating to assets with refresh flag'); setTimeout(() => navigate('/assets?refresh=true&sortBy=date&sortDirection=desc', { replace: true }), 500) }} style={buttonStyle(true)}>
               View My Assets <ArrowRight size={16} />
             </button>
             <button type="button" onClick={() => navigate('/dashboard', { replace: true })} style={buttonStyle(false)}>

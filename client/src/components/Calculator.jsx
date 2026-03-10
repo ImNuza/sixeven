@@ -765,10 +765,10 @@ export default function AddAssetModal({ onClose }) {
     try {
       await createAsset(buildPayload())
       setSubmitted(true)
-      // Navigate to Assets page after successful creation
+      // Navigate to Assets page after successful creation (sorted by date to show new asset at top)
       setTimeout(() => {
         onClose()
-        navigate('/assets')
+        navigate('/assets?sortBy=date&sortDirection=desc')
       }, 900)
     } catch (err) {
       setSubmitError(err.message || 'Failed to add asset.')
