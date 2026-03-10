@@ -9,6 +9,7 @@ import {
   ArrowUpRight, ArrowDownRight, Clock, Zap, Briefcase,
 } from 'lucide-react'
 import { fetchAssets, fetchPrices, refreshPrices } from '../services/api.js'
+import { useAuth } from '../auth/AuthContext.jsx'
 
 // ── API helpers ───────────────────────────────────────────────────────────────
 async function apiFetch(path) {
@@ -220,6 +221,11 @@ function SymbolRow({ item, isSelected, onSelect, starred, onToggleStar }) {
 
 // ── Main component ────────────────────────────────────────────────────────────
 export default function Markets() {
+  const { user } = useAuth()
+  const starredStorageKey = useMemo(
+    () => (user?.id ? `mkt_starred:${user.id}` : 'mkt_starred:anon'),
+    [user?.id]
+  )
   const [overview, setOverview] = useState(null)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -228,13 +234,22 @@ export default function Markets() {
   const [selected, setSelected] = useState(null)
   const [range, setRange] = useState('1mo')
   const [search, setSearch] = useState('')
-  const [starred, setStarred] = useState(() => {
-    try { return new Set(JSON.parse(localStorage.getItem('mkt_starred') || '[]')) } catch { return new Set() }
-  })
+  const [starred, setStarred] = useState(new Set())
   const [quote, setQuote] = useState(null)
   const [quoteLoading, setQuoteLoading] = useState(false)
   const [assets, setAssets] = useState([])
   const [priceCache, setPriceCache] = useState([])
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(starredStorageKey)
+      setStarred(new Set(raw ? JSON.parse(raw) : []))
+      // Clean up legacy non-scoped key once per session to avoid cross-account leakage.
+      localStorage.removeItem('mkt_starred')
+    } catch {
+      setStarred(new Set())
+    }
+  }, [starredStorageKey])
 
   const loadOverview = useCallback(async () => {
     try {
@@ -291,7 +306,7 @@ export default function Markets() {
     setStarred(prev => {
       const next = new Set(prev)
       if (next.has(ticker)) next.delete(ticker); else next.add(ticker)
-      localStorage.setItem('mkt_starred', JSON.stringify([...next]))
+      localStorage.setItem(starredStorageKey, JSON.stringify([...next]))
       return next
     })
   }

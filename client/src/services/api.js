@@ -134,6 +134,34 @@ export async function fetchPortfolioHistory() {
   return request('/api/portfolio/history')
 }
 
+export async function fetchDashboardData() {
+  try {
+    const response = await request('/api/dashboard')
+    const assets = Array.isArray(response?.assets) ? response.assets : []
+
+    return {
+      assets: assets.map(normalizeAsset),
+      summary: response?.summary || null,
+      history: Array.isArray(response?.history) ? response.history : [],
+      prices: Array.isArray(response?.prices) ? response.prices : [],
+    }
+  } catch (error) {
+    // Backward-compatible fallback when server does not yet expose /api/dashboard.
+    if (!String(error?.message || '').includes('404')) {
+      throw error
+    }
+
+    const [assets, summary, history, prices] = await Promise.all([
+      fetchAssets(),
+      fetchPortfolioSummary(),
+      fetchPortfolioHistory(),
+      fetchPrices(),
+    ])
+
+    return { assets, summary, history, prices }
+  }
+}
+
 export async function fetchInsights(query = {}) {
   return request(withQuery('/api/insights', query))
 }
@@ -325,4 +353,15 @@ export async function disconnectSingpass() {
 
 export async function lookupPropertyByPostcode(postcode) {
   return request(`/api/property/lookup?postcode=${encodeURIComponent(postcode)}`)
+}
+
+export async function fetchOnboardingDemoLinks() {
+  return request('/api/onboarding/demo-links')
+}
+
+export async function saveOnboardingDemoLinks(selectedProviders = [], metadataByProvider = {}) {
+  return request('/api/onboarding/demo-links', {
+    method: 'POST',
+    body: JSON.stringify({ selectedProviders, metadataByProvider }),
+  })
 }

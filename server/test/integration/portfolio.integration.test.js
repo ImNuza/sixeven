@@ -60,7 +60,7 @@ async function registerUser(baseUrl, username) {
   return registerResult.body
 }
 
-test('integration: portfolio history returns seeded snapshots for a registered account', async () => {
+test('integration: portfolio history is empty for a newly registered account', async () => {
   const database = await createTempDatabase()
   const { server, baseUrl } = await startTestServer(database.pool)
 
@@ -74,8 +74,7 @@ test('integration: portfolio history returns seeded snapshots for a registered a
     })
 
     assert.equal(historyResult.response.status, 200)
-    assert.equal(historyResult.body.length, 6)
-    assert.equal(historyResult.body[0].source, 'seed')
+    assert.equal(historyResult.body.length, 0)
   } finally {
     await new Promise((resolve) => server.close(resolve))
     await database.cleanup()

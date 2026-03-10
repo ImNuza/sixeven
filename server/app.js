@@ -11,6 +11,7 @@ import { createAssetsController } from './controllers/assetsController.js'
 import { createAuthController } from './controllers/authController.js'
 import { createAuthMiddleware } from './middleware/auth.js'
 import { getInsightsPayload } from './services/insightsService.js'
+import { decrypt, decryptJSON, encrypt, encryptJSON } from './services/encryptionService.js'
 
 // ── Plaid client ──────────────────────────────────────────────
 function makePlaidClient() {
@@ -90,6 +91,235 @@ const ALCHEMY_NETWORKS = {
   137: 'polygon-mainnet',
   42161: 'arb-mainnet',
   56: 'bnb-mainnet',
+}
+
+const DEMO_PROVIDER = Object.freeze({
+  MOOMOO_SG: 'moomoo_sg',
+  CRYPTO_WALLET: 'crypto_wallet',
+})
+
+const DEMO_IMPORT_TAG = Object.freeze({
+  [DEMO_PROVIDER.MOOMOO_SG]: 'demo-moomoo-sg',
+  [DEMO_PROVIDER.CRYPTO_WALLET]: 'demo-crypto-wallet',
+})
+
+const SUPPORTED_DEMO_PROVIDERS = new Set(Object.values(DEMO_PROVIDER))
+const USD_SGD = 1.35
+let aiRequestQueue = Promise.resolve()
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function isConcurrencyLimitError(error) {
+  const status = Number(error?.status || error?.response?.status || 0)
+  const message = String(error?.response?.data?.error?.message || error?.message || '').toLowerCase()
+  return status === 429 && message.includes('concurrency')
+}
+
+function enqueueAiRequest(task) {
+  const next = aiRequestQueue.then(task, task)
+  aiRequestQueue = next.catch(() => {})
+  return next
+}
+
+function parseStoredJson(raw, fallback = {}) {
+  if (raw == null) return fallback
+  if (typeof raw === 'object') return raw
+  try {
+    return JSON.parse(String(raw))
+  } catch {
+    return fallback
+  }
+}
+
+function normalizeSelectedDemoProviders(input = []) {
+  if (!Array.isArray(input)) {
+    return []
+  }
+
+  const seen = new Set()
+  const selected = []
+  for (const value of input) {
+    const provider = String(value || '').trim().toLowerCase()
+    if (!SUPPORTED_DEMO_PROVIDERS.has(provider) || seen.has(provider)) {
+      continue
+    }
+    selected.push(provider)
+    seen.add(provider)
+  }
+  return selected
+}
+
+function providerAssetKey(asset) {
+  const ticker = String(asset.ticker || '').trim().toUpperCase()
+  const name = String(asset.name || '').trim().toLowerCase()
+  if (ticker) return `ticker:${ticker}`
+  return `name:${name}`
+}
+
+async function listUserAssetsForImport(pool, userId) {
+  const { rows } = await pool.query(
+    'SELECT id, name, category, ticker, quantity, value, cost, date, institution, details FROM assets WHERE user_id = $1',
+    [userId]
+  )
+  return rows.map((row) => ({
+    ...row,
+    institution: decrypt(row.institution),
+    details: decryptJSON(row.details),
+  }))
+}
+
+async function removeImportedAssetsForTag(pool, userId, importedFrom) {
+  const assets = await listUserAssetsForImport(pool, userId)
+  const ids = assets
+    .filter((asset) => asset.details?.importedFrom === importedFrom)
+    .map((asset) => asset.id)
+
+  for (const id of ids) {
+    await pool.query('DELETE FROM assets WHERE id = $1 AND user_id = $2', [id, userId])
+  }
+}
+
+async function upsertImportedAssets(pool, userId, importedFrom, desiredAssets) {
+  const existing = await listUserAssetsForImport(pool, userId)
+  const existingByKey = new Map(
+    existing
+      .filter((asset) => asset.details?.importedFrom === importedFrom)
+      .map((asset) => [providerAssetKey(asset), asset])
+  )
+
+  const desiredKeys = new Set()
+  for (const asset of desiredAssets) {
+    const key = providerAssetKey(asset)
+    desiredKeys.add(key)
+    const match = existingByKey.get(key)
+    const safeInstitution = encrypt(asset.institution || null)
+    const safeDetails = encryptJSON(asset.details || {})
+
+    if (match) {
+      await pool.query(
+        `UPDATE assets
+         SET name = $1, category = $2, ticker = $3, quantity = $4, value = $5, cost = $6, date = $7, institution = $8, details = $9
+         WHERE id = $10 AND user_id = $11`,
+        [
+          asset.name,
+          asset.category,
+          asset.ticker || null,
+          asset.quantity == null ? null : Number(asset.quantity),
+          Number(asset.value || 0),
+          Number(asset.cost || 0),
+          asset.date,
+          safeInstitution,
+          safeDetails,
+          match.id,
+          userId,
+        ]
+      )
+      continue
+    }
+
+    await pool.query(
+      `INSERT INTO assets (user_id, name, category, ticker, quantity, value, cost, date, institution, details)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      [
+        userId,
+        asset.name,
+        asset.category,
+        asset.ticker || null,
+        asset.quantity == null ? null : Number(asset.quantity),
+        Number(asset.value || 0),
+        Number(asset.cost || 0),
+        asset.date,
+        safeInstitution,
+        safeDetails,
+      ]
+    )
+  }
+
+  for (const [key, asset] of existingByKey.entries()) {
+    if (desiredKeys.has(key)) continue
+    await pool.query('DELETE FROM assets WHERE id = $1 AND user_id = $2', [asset.id, userId])
+  }
+}
+
+async function buildDemoMoomooAssets() {
+  const { getDemoPositions } = await import('./services/moomooService.js')
+  const data = getDemoPositions()
+  const today = new Date().toISOString().slice(0, 10)
+  return (data.positions || []).map((position) => {
+    const isSgd = String(position.currency || '').toUpperCase() === 'SGD'
+    const rate = isSgd ? 1 : USD_SGD
+    const value = Math.round(Number(position.marketValue || 0) * rate * 100) / 100
+    const cost = position.avgCost > 0
+      ? Math.round(Number(position.avgCost || 0) * Number(position.quantity || 0) * rate * 100) / 100
+      : value
+
+    return {
+      name: position.name || position.ticker || 'Demo Position',
+      category: 'STOCKS',
+      ticker: position.ticker || null,
+      quantity: Number(position.quantity || 0),
+      value,
+      cost,
+      date: today,
+      institution: 'moomoo SG (Demo)',
+      details: {
+        importedFrom: DEMO_IMPORT_TAG[DEMO_PROVIDER.MOOMOO_SG],
+        source: 'onboarding-demo',
+        accountId: data.accountId || null,
+        currency: position.currency || null,
+        originalCode: position.code || null,
+      },
+    }
+  })
+}
+
+async function buildDemoCryptoWalletAssets() {
+  const { getDemoBalances } = await import('./services/cexService.js')
+  const today = new Date().toISOString().slice(0, 10)
+  return getDemoBalances().map((token) => {
+    const value = Math.round(Number(token.nativeValue || 0) * USD_SGD * 100) / 100
+    return {
+      name: token.name || token.symbol || 'Demo Crypto',
+      category: 'CRYPTO',
+      ticker: token.coingeckoId || String(token.symbol || '').toLowerCase(),
+      quantity: Number(token.balance || 0),
+      value,
+      cost: value,
+      date: today,
+      institution: 'Crypto Wallet (Demo)',
+      details: {
+        importedFrom: DEMO_IMPORT_TAG[DEMO_PROVIDER.CRYPTO_WALLET],
+        source: 'onboarding-demo',
+        symbol: token.symbol || null,
+      },
+    }
+  })
+}
+
+async function syncDemoProviderAssets(pool, userId, selectedProviders) {
+  if (selectedProviders.includes(DEMO_PROVIDER.MOOMOO_SG)) {
+    await upsertImportedAssets(
+      pool,
+      userId,
+      DEMO_IMPORT_TAG[DEMO_PROVIDER.MOOMOO_SG],
+      await buildDemoMoomooAssets()
+    )
+  } else {
+    await removeImportedAssetsForTag(pool, userId, DEMO_IMPORT_TAG[DEMO_PROVIDER.MOOMOO_SG])
+  }
+
+  if (selectedProviders.includes(DEMO_PROVIDER.CRYPTO_WALLET)) {
+    await upsertImportedAssets(
+      pool,
+      userId,
+      DEMO_IMPORT_TAG[DEMO_PROVIDER.CRYPTO_WALLET],
+      await buildDemoCryptoWalletAssets()
+    )
+  } else {
+    await removeImportedAssetsForTag(pool, userId, DEMO_IMPORT_TAG[DEMO_PROVIDER.CRYPTO_WALLET])
+  }
 }
 
 async function alchemyRpc(network, method, params) {
@@ -192,6 +422,48 @@ export function createApp({
   app.put('/api/auth/password', requireAuth, authController.updatePassword)
   app.delete('/api/auth/account', requireAuth, authController.removeAccount)
 
+  app.get('/api/dashboard', requireAuth, async (req, res) => {
+    try {
+      // Run freshness check once for the whole dashboard payload instead of once per widget endpoint.
+      ensureFreshPrices(req.user.id).catch(() => {})
+
+      const [assetResult, summary, history, pricesResult] = await Promise.all([
+        pool.query(
+          `SELECT *
+           FROM assets
+           WHERE user_id = $1
+           ORDER BY value DESC, name ASC`,
+          [req.user.id]
+        ),
+        getPortfolioSummary(req.user.id),
+        getPortfolioHistory(req.user.id),
+        pool.query(
+          `SELECT DISTINCT pc.*
+           FROM price_cache pc
+           INNER JOIN assets a ON a.ticker = pc.symbol
+           WHERE a.user_id = $1
+           ORDER BY pc.updated_at DESC`,
+          [req.user.id]
+        ),
+      ])
+
+      const assets = assetResult.rows.map((row) => ({
+        ...row,
+        institution: decrypt(row.institution),
+        details: decryptJSON(row.details),
+      }))
+
+      res.json({
+        assets,
+        summary,
+        history,
+        prices: pricesResult.rows,
+      })
+    } catch (err) {
+      res.status(500).json({ error: err.message })
+    }
+  })
+
   app.get('/api/assets', requireAuth, (req, res) => {
     // Fire-and-forget: refresh prices in background so the response
     // is not blocked by slow external calls (Yahoo Finance / CoinGecko).
@@ -235,11 +507,29 @@ export function createApp({
         role: ['user', 'assistant', 'system'].includes(m.role) ? m.role : 'user',
         content: String(m.content || '').slice(0, MAX_MSG_LEN),
       }))
-      const apiKey = process.env.FEATHERLESS_API_KEY
-      if (!apiKey) return res.status(503).json({ error: 'AI service not configured' })
+      const apiKey = process.env.AI_PROVIDER_API_KEY || process.env.FEATHERLESS_API_KEY
+      const baseURL = process.env.AI_PROVIDER_BASE_URL || process.env.FEATHERLESS_BASE_URL || 'https://api.featherless.ai/v1'
+      const model = process.env.AI_MODEL || process.env.FEATHERLESS_MODEL || 'Qwen/Qwen3-70B-Instruct'
+      const timeoutMs = Number(process.env.AI_TIMEOUT_MS || 30000)
+      const maxRetries = Math.max(0, Number(process.env.AI_CONCURRENCY_RETRIES || 3))
+      const retryBaseMs = Math.max(300, Number(process.env.AI_CONCURRENCY_RETRY_BASE_MS || 1500))
+      const fallbackModels = String(
+        process.env.AI_MODEL_FALLBACKS
+        || process.env.FEATHERLESS_MODEL_FALLBACKS
+        || 'Qwen/Qwen2.5-32B-Instruct,Qwen/Qwen2.5-14B-Instruct,perplexity-ai/r1-1776-distill-llama-70b'
+      )
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean)
+
+      if (!apiKey || !baseURL || !model) {
+        return res.status(503).json({
+          error: 'AI service not configured. Set AI_PROVIDER_API_KEY, AI_PROVIDER_BASE_URL, and AI_MODEL.',
+        })
+      }
 
       const { default: OpenAI } = await import('openai')
-      const openai = new OpenAI({ baseURL: 'https://api.featherless.ai/v1', apiKey })
+      const openai = new OpenAI({ baseURL, apiKey, timeout: timeoutMs })
 
       // Guard: reject clearly off-topic messages before hitting the model
       const lastUserMsg = [...safeMessages].reverse().find(m => m.role === 'user')?.content?.toLowerCase() || ''
@@ -280,16 +570,146 @@ HARD RULES:
         systemMessages.push({ role: 'system', content: `User's current portfolio context (use this to personalise all advice):\n${portfolioContext}` })
       }
 
-      const completion = await openai.chat.completions.create({
-        model: 'perplexity-ai/r1-1776-distill-llama-70b',
-        messages: [...systemMessages, ...safeMessages],
-        max_tokens: 700,
-        temperature: 0.4,
-      })
+      const modelCandidates = [model, ...fallbackModels.filter((candidate) => candidate !== model)]
+      let completion = null
+      let lastModelError = null
 
-      res.json({ reply: completion.choices[0].message.content })
+      for (const candidateModel of modelCandidates) {
+        for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+          try {
+            completion = await enqueueAiRequest(() => openai.chat.completions.create({
+              model: candidateModel,
+              messages: [...systemMessages, ...safeMessages],
+              max_tokens: 700,
+              temperature: 0.4,
+            }))
+            break
+          } catch (candidateError) {
+            lastModelError = candidateError
+            if (!isConcurrencyLimitError(candidateError) || attempt >= maxRetries) {
+              break
+            }
+            const backoff = retryBaseMs * (attempt + 1)
+            await sleep(backoff)
+          }
+        }
+        if (completion) {
+          break
+        }
+      }
+
+      if (!completion) {
+        throw lastModelError || new Error('AI provider request failed for all configured models.')
+      }
+
+      const reply = completion?.choices?.[0]?.message?.content
+      if (!reply || !String(reply).trim()) {
+        return res.status(502).json({ error: 'AI provider returned an empty response.' })
+      }
+
+      res.json({ reply })
     } catch (err) {
-      res.status(500).json({ error: err.message || 'AI request failed' })
+      const status = Number(err?.status || err?.response?.status || 500)
+      const message = err?.response?.data?.error?.message || err?.message || 'AI request failed'
+      if (status === 401 || status === 403) {
+        return res.status(502).json({ error: 'AI provider rejected the request. Check API key and model access.' })
+      }
+      if (status === 429) {
+        return res.status(429).json({ error: 'AI provider rate limit reached. Please retry shortly.' })
+      }
+      if (status >= 400 && status < 500) {
+        return res.status(400).json({ error: `AI request invalid: ${message}` })
+      }
+      res.status(502).json({ error: `AI provider request failed: ${message}` })
+    }
+  })
+
+  app.get('/api/onboarding/demo-links', requireAuth, async (req, res) => {
+    try {
+      const { rows } = await pool.query(
+        `SELECT provider, enabled, metadata, connected_at, updated_at
+         FROM linked_demo_accounts
+         WHERE user_id = $1
+         ORDER BY provider ASC`,
+        [req.user.id]
+      )
+
+      res.json({
+        providers: rows.map((row) => ({
+          provider: row.provider,
+          enabled: Boolean(row.enabled),
+          metadata: parseStoredJson(row.metadata, {}),
+          connectedAt: row.connected_at,
+          updatedAt: row.updated_at,
+        })),
+      })
+    } catch (err) {
+      res.status(500).json({ error: err.message || 'Failed to load demo links.' })
+    }
+  })
+
+  app.post('/api/onboarding/demo-links', requireAuth, async (req, res) => {
+    const selectedProviders = normalizeSelectedDemoProviders(req.body?.selectedProviders)
+    const selectedSet = new Set(selectedProviders)
+    const metadataByProvider = parseStoredJson(req.body?.metadataByProvider, {})
+    const client = await pool.connect()
+
+    try {
+      await client.query('BEGIN')
+      const { rows: existing } = await client.query(
+        'SELECT provider FROM linked_demo_accounts WHERE user_id = $1',
+        [req.user.id]
+      )
+      const existingSet = new Set(existing.map((row) => row.provider))
+
+      for (const provider of SUPPORTED_DEMO_PROVIDERS) {
+        const enabled = selectedSet.has(provider)
+        const metadata = parseStoredJson(metadataByProvider?.[provider], {})
+
+        if (existingSet.has(provider)) {
+          await client.query(
+            `UPDATE linked_demo_accounts
+             SET enabled = $1, metadata = $2, updated_at = CURRENT_TIMESTAMP
+             WHERE user_id = $3 AND provider = $4`,
+            [enabled, JSON.stringify(metadata), req.user.id, provider]
+          )
+          continue
+        }
+
+        await client.query(
+          `INSERT INTO linked_demo_accounts (user_id, provider, enabled, metadata)
+           VALUES ($1, $2, $3, $4)`,
+          [req.user.id, provider, enabled, JSON.stringify(metadata)]
+        )
+      }
+
+      await syncDemoProviderAssets(client, req.user.id, selectedProviders)
+      await recordNetWorthSnapshot(req.user.id, 'onboarding_demo_sync', client)
+      await client.query('COMMIT')
+
+      const { rows } = await client.query(
+        `SELECT provider, enabled, metadata, connected_at, updated_at
+         FROM linked_demo_accounts
+         WHERE user_id = $1
+         ORDER BY provider ASC`,
+        [req.user.id]
+      )
+
+      res.json({
+        selectedProviders,
+        providers: rows.map((row) => ({
+          provider: row.provider,
+          enabled: Boolean(row.enabled),
+          metadata: parseStoredJson(row.metadata, {}),
+          connectedAt: row.connected_at,
+          updatedAt: row.updated_at,
+        })),
+      })
+    } catch (err) {
+      await client.query('ROLLBACK')
+      res.status(500).json({ error: err.message || 'Failed to save onboarding demo links.' })
+    } finally {
+      client.release()
     }
   })
 
@@ -427,35 +847,83 @@ HARD RULES:
     if (plaidClient) {
       try { await plaidClient.itemRemove({ access_token: rows[0].access_token }) } catch { /* best effort */ }
     }
-    await pool.query('DELETE FROM plaid_items WHERE id = $1', [req.params.id])
+    await pool.query('DELETE FROM plaid_items WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id])
     res.status(204).end()
   })
 
   // ── OCBC Open API (OAuth 2.0 Client Credentials) ──────────────
   // No redirect URL needed — server exchanges client_id + client_secret directly.
-  const OCBC_TOKEN_URL = process.env.OCBC_TOKEN_URL || 'https://api.ocbc.com/token'
   const OCBC_API_BASE  = process.env.OCBC_API_BASE  || 'https://api.ocbc.com'
+  const OCBC_TOKEN_URL = process.env.OCBC_TOKEN_URL || `${OCBC_API_BASE}/token`
+
+  function firstEnv(...keys) {
+    for (const key of keys) {
+      const value = process.env[key]
+      if (typeof value === 'string' && value.trim()) {
+        return value.trim()
+      }
+    }
+    return ''
+  }
+
+  function getOcbcCredentials() {
+    const clientId = firstEnv('OCBC_CLIENT_ID', 'OCBC_APP_ID', 'OCBC_API_KEY')
+    const clientSecret = firstEnv('OCBC_CLIENT_SECRET', 'OCBC_SECRET', 'OCBC_API_SECRET')
+    return { clientId, clientSecret }
+  }
+
+  function getMyInfoConfig() {
+    const appId = firstEnv('MYINFO_APP_ID', 'SINGPASS_APP_ID', 'SINGPASS_CLIENT_ID')
+    const privateKey = firstEnv('MYINFO_PRIVATE_KEY', 'SINGPASS_PRIVATE_KEY').replace(/\\r/g, '').replace(/\\n/g, '\n')
+    const redirectUri = firstEnv('MYINFO_REDIRECT_URI', 'SINGPASS_REDIRECT_URI') || 'http://localhost:3001/api/singpass/callback'
+    return { appId, privateKey, redirectUri }
+  }
 
   async function getOcbcToken() {
-    const clientId     = process.env.OCBC_CLIENT_ID
-    const clientSecret = process.env.OCBC_CLIENT_SECRET
+    const { clientId, clientSecret } = getOcbcCredentials()
     if (!clientId || !clientSecret || clientId.includes('your_') || clientSecret.includes('your_')) {
-      throw new Error('OCBC credentials are not configured for this environment. Use manual bank input or connect later.')
+      throw new Error('OCBC credentials are not configured. Set OCBC_CLIENT_ID and OCBC_CLIENT_SECRET in server/.env, then restart.')
     }
 
     const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString('base64')
-    const tokenRes = await axios.post(
-      OCBC_TOKEN_URL,
-      new URLSearchParams({ grant_type: 'client_credentials' }).toString(),
-      {
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          Authorization: `Basic ${credentials}`,
+    const tokenUrls = [...new Set([OCBC_TOKEN_URL, `${OCBC_API_BASE}/oauth/token`, `${OCBC_API_BASE}/token`])]
+    const attempts = []
+
+    for (const tokenUrl of tokenUrls) {
+      const requestModes = [
+        {
+          data: new URLSearchParams({ grant_type: 'client_credentials' }).toString(),
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            Authorization: `Basic ${credentials}`,
+          },
         },
-        timeout: 15000,
+        {
+          data: new URLSearchParams({
+            grant_type: 'client_credentials',
+            client_id: clientId,
+            client_secret: clientSecret,
+          }).toString(),
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+        },
+      ]
+
+      for (const mode of requestModes) {
+        try {
+          const tokenRes = await axios.post(tokenUrl, mode.data, {
+            headers: mode.headers,
+            timeout: 15000,
+          })
+          return tokenRes.data // { access_token, expires_in, token_type, ... }
+        } catch (error) {
+          attempts.push(`${tokenUrl} -> ${error.response?.status || error.code || error.message}`)
+        }
       }
-    )
-    return tokenRes.data // { access_token, expires_in, token_type, ... }
+    }
+
+    throw new Error(`OCBC token request failed. Verify credentials, OCBC_TOKEN_URL, and network access. Attempts: ${attempts.join(' | ')}`)
   }
 
   // Connect: fetch a client-credentials token and store it
@@ -533,9 +1001,10 @@ HARD RULES:
 
   // ── SGFinDex / MyInfo ─────────────────────────────────────────
   app.get('/api/singpass/auth-url', requireAuth, async (req, res) => {
-    const appId = process.env.MYINFO_APP_ID
-    const redirectUri = process.env.MYINFO_REDIRECT_URI || 'http://localhost:3001/api/singpass/callback'
-    if (!appId) return res.status(503).json({ error: 'MYINFO_APP_ID not configured' })
+    const { appId, redirectUri } = getMyInfoConfig()
+    if (!appId) {
+      return res.status(503).json({ error: 'MYINFO_APP_ID not configured. Set MYINFO_APP_ID (or SINGPASS_APP_ID) in server/.env and restart.' })
+    }
 
     const codeVerifier = crypto.randomBytes(32).toString('base64url')
     const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url')
@@ -565,10 +1034,12 @@ HARD RULES:
     pkceStore.delete(state)
 
     const { codeVerifier, userId } = session
-    const appId = process.env.MYINFO_APP_ID
-    const privateKeyPem = process.env.MYINFO_PRIVATE_KEY?.replace(/\\n/g, '\n')
-    const redirectUri = process.env.MYINFO_REDIRECT_URI || 'http://localhost:3001/api/singpass/callback'
+    const { appId, privateKey: privateKeyPem, redirectUri } = getMyInfoConfig()
     const tokenUrl = `${MYINFO_BASE}/com/v4/token`
+    if (!appId || !privateKeyPem) {
+      const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173'
+      return res.redirect(`${clientUrl}/assets?singpass=error&msg=${encodeURIComponent('MYINFO_APP_ID or MYINFO_PRIVATE_KEY not configured on server')}`)
+    }
 
     try {
       const clientAssertion = await makeMyInfoClientAssertion(appId, tokenUrl, privateKeyPem)

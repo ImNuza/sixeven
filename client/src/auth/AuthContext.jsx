@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState } from 'react'
 import { clearStoredSession, loadStoredSession, saveStoredSession } from './storage.js'
+import { clearOnboardingProfilesExcept } from '../onboarding/storage.js'
 import {
   changePassword as changePasswordRequest,
   deleteAccount as deleteAccountRequest,
@@ -56,6 +57,7 @@ export function AuthProvider({ children }) {
   async function login(credentials) {
     const nextSession = await loginUser(credentials)
     const safe = { user: nextSession.user }
+    clearOnboardingProfilesExcept(nextSession.user?.id)
     saveStoredSession(safe)
     setSession(safe)
     return nextSession
@@ -64,6 +66,7 @@ export function AuthProvider({ children }) {
   async function register(credentials) {
     const nextSession = await registerUser(credentials)
     const safe = { user: nextSession.user }
+    clearOnboardingProfilesExcept(nextSession.user?.id)
     saveStoredSession(safe)
     setSession(safe)
     return nextSession
@@ -71,6 +74,7 @@ export function AuthProvider({ children }) {
 
   async function logout() {
     try { await logoutUser() } catch { /* best effort — server revokes token */ }
+    clearOnboardingProfilesExcept(null)
     clearStoredSession()
     setSession(null)
   }
@@ -86,6 +90,7 @@ export function AuthProvider({ children }) {
   async function updateProfile(payload) {
     const result = await updateProfileRequest(payload)
     const nextSession = { user: result.user }
+    clearOnboardingProfilesExcept(nextSession.user?.id)
     saveStoredSession(nextSession)
     setSession(nextSession)
     return result
@@ -93,6 +98,7 @@ export function AuthProvider({ children }) {
 
   async function deleteAccount(payload) {
     const result = await deleteAccountRequest(payload)
+    clearOnboardingProfilesExcept(null)
     clearStoredSession()
     setSession(null)
     return result

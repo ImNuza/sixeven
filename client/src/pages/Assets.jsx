@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { ArrowDownUp, ChevronLeft, ChevronRight, Download, Link2, Pencil, PlusCircle, RefreshCw, Search, Trash2, Wallet, CheckSquare, Square } from 'lucide-react'
+import { ArrowDownUp, ChevronLeft, ChevronRight, Download, Link2, Pencil, RefreshCw, Search, Trash2, Wallet, CheckSquare, Square } from 'lucide-react'
 import AssetForm from '../components/AssetForm'
 import { ASSET_CATEGORIES, CATEGORY_COLORS } from '../../../shared/constants.js'
 import { deleteAsset, fetchAssetsPage, fetchPrices, refreshPrices, updateAsset } from '../services/api.js'
@@ -332,13 +332,6 @@ export default function Assets() {
             <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
             {isRefreshing ? 'Refreshing...' : 'Refresh Prices'}
           </button>
-          <Link
-            to="/add"
-            className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-accent to-blue-600 px-4 py-3 text-sm font-semibold text-white"
-          >
-            <PlusCircle className="h-4 w-4" />
-            Add Asset
-          </Link>
         </div>
       </div>
 
