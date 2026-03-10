@@ -94,15 +94,16 @@ export const WELLNESS_THRESHOLDS = {
 }
 
 export const WELLNESS_WEIGHTS = {
-  diversification: 12,
-  liquidity: 12,
-  cryptoExposure: 10,
-  emergencyFund: 12,
-  concentrationRisk: 12,
-  assetGrowthTrend: 10,
-  incomeGenerating: 10,
-  debtHealth: 12,                  // New: debt-to-asset ratio
-  rebalancingAlert: 10,
+  diversification: 11,
+  liquidity: 11,
+  cryptoExposure: 9,
+  emergencyFund: 11,
+  concentrationRisk: 11,
+  assetGrowthTrend: 9,
+  incomeGenerating: 9,
+  debtHealth: 11,
+  rebalancingAlert: 9,
+  savingsRate: 9,                   // Income vs expenses health
 }
 
 // Liquidity classification for each category (0-1 scale)
@@ -127,6 +128,61 @@ export const CATEGORY_VOLATILITY = {
   FOREX: 0.5,
   CRYPTO: 0.8,
   OTHER: 0.3,
+}
+
+/**
+ * Parse a monthly-expenses range string into a numeric midpoint (monthly SGD).
+ * Returns null when the range is not recognised so callers can fall back to defaults.
+ */
+export function parseMonthlyExpenses(range) {
+  if (!range) return null
+  const map = {
+    'Below S$2,000': 1500,
+    'S$2,000 - S$4,000': 3000,
+    'S$4,001 - S$7,000': 5500,
+    'S$7,001 - S$10,000': 8500,
+    'Above S$10,000': 12000,
+  }
+  return map[range] ?? null
+}
+
+/**
+ * Parse an annual-income range string into a numeric midpoint (annual SGD).
+ */
+export function parseAnnualIncome(range) {
+  if (!range) return null
+  const map = {
+    'Below S$30,000': 24000,
+    'S$30,000 - S$60,000': 45000,
+    'S$60,001 - S$100,000': 80000,
+    'S$100,001 - S$180,000': 140000,
+    'Above S$180,000': 220000,
+  }
+  return map[range] ?? null
+}
+
+/**
+ * Return a copy of WELLNESS_THRESHOLDS adjusted for the user's risk appetite.
+ * Conservative → tighter limits, bigger safety buffers.
+ * Aggressive   → wider risk tolerance, smaller safety buffers.
+ * Moderate / unknown → unchanged defaults.
+ */
+export function getRiskAdjustedThresholds(riskAppetite) {
+  const t = { ...WELLNESS_THRESHOLDS }
+  if (riskAppetite === 'Conservative') {
+    t.CRYPTO_MAX = 0.15
+    t.DIVERSIFICATION_MAX = 0.35
+    t.SINGLE_ASSET_MAX = 0.20
+    t.EMERGENCY_FUND_MONTHS = 9
+    t.DEBT_TO_ASSET_MAX = 0.35
+  } else if (riskAppetite === 'Aggressive') {
+    t.CRYPTO_MAX = 0.40
+    t.DIVERSIFICATION_MAX = 0.50
+    t.SINGLE_ASSET_MAX = 0.35
+    t.EMERGENCY_FUND_MONTHS = 3
+    t.DEBT_TO_ASSET_MAX = 0.60
+  }
+  return t
 }
 
 export const TARGET_ALLOCATION = {

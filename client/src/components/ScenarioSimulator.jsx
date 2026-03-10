@@ -154,12 +154,12 @@ function applyTransferTo(assets, scenario, value) {
   })
 }
 
-export default function ScenarioSimulator({ assets }) {
+export default function ScenarioSimulator({ assets, userProfile }) {
   const [expanded, setExpanded] = useState(true)
   const [activeScenario, setActiveScenario] = useState(SCENARIOS[0])
   const [sliderValue, setSliderValue] = useState(SCENARIOS[0].defaultValue)
 
-  const currentScore = useMemo(() => calculateWellnessScore(assets), [assets])
+  const currentScore = useMemo(() => calculateWellnessScore(assets, { userProfile }), [assets, userProfile])
   const currentStatus = useMemo(() => getWellnessStatus(currentScore.score), [currentScore.score])
 
   const projectedAssets = useMemo(() => {
@@ -168,7 +168,7 @@ export default function ScenarioSimulator({ assets }) {
     return modified
   }, [assets, activeScenario, sliderValue])
 
-  const projectedScore = useMemo(() => calculateWellnessScore(projectedAssets), [projectedAssets])
+  const projectedScore = useMemo(() => calculateWellnessScore(projectedAssets, { userProfile }), [projectedAssets, userProfile])
   const projectedStatus = useMemo(() => getWellnessStatus(projectedScore.score), [projectedScore.score])
 
   const scoreDelta = projectedScore.score - currentScore.score

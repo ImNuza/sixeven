@@ -244,12 +244,12 @@ export default function Dashboard() {
     return () => window.removeEventListener('safeseven:onboarding', syncOnboardingProfile)
   }, [user?.id])
 
-  const { score, breakdown } = useMemo(
-    () => calculateWellnessScore(assets, { monthlyChangePct: summary?.monthlyChangePct ?? null }),
-    [assets, summary]
+  const { score, breakdown, goalHints } = useMemo(
+    () => calculateWellnessScore(assets, { monthlyChangePct: summary?.monthlyChangePct ?? null, userProfile: onboardingProfile }),
+    [assets, summary, onboardingProfile]
   )
   const healthStatus = useMemo(() => getWellnessStatus(score), [score])
-  const insights = useMemo(() => buildPortfolioInsights(assets, summary, prices), [assets, prices, summary])
+  const insights = useMemo(() => buildPortfolioInsights(assets, summary, prices, onboardingProfile), [assets, prices, summary, onboardingProfile])
 
   const pieData = useMemo(() => {
     const grouped = {}
@@ -773,7 +773,7 @@ function WellnessContent({ breakdown, healthStatus, score }) {
   return (
     <>
       <div className="flex items-start justify-between mb-5">
-        <SectionHeader title="Wellness Breakdown" sub="The 8 factors behind your score" />
+        <SectionHeader title="Wellness Breakdown" sub="The 10 factors behind your score" />
         <HealthRing score={score} color={healthStatus.color} size={80} />
       </div>
       <div className="space-y-3">

@@ -5,6 +5,9 @@ import {
   CATEGORY_LIQUIDITY,
   CATEGORY_VOLATILITY,
   isStablecoin,
+  parseMonthlyExpenses,
+  parseAnnualIncome,
+  getRiskAdjustedThresholds,
 } from '../../../shared/constants.js'
 
 export function getWellnessStatus(score) {
@@ -88,12 +91,20 @@ function getAssetYield(asset) {
 }
 
 export function calculateWellnessScore(assets, options = {}) {
-  const { monthlyChangePct = null } = options
+  const { monthlyChangePct = null, userProfile = null } = options
   const total = assets.reduce((sum, a) => sum + a.value, 0)
   if (total === 0) return { score: 0, breakdown: [] }
 
   const W = WELLNESS_WEIGHTS
-  const T = WELLNESS_THRESHOLDS
+  // Adjust thresholds based on user's risk appetite (falls back to defaults)
+  const T = userProfile?.riskAppetite
+    ? getRiskAdjustedThresholds(userProfile.riskAppetite)
+    : WELLNESS_THRESHOLDS
+
+  // Use the user's actual monthly expenses when available, otherwise fall back to default
+  const monthlyExpenses = parseMonthlyExpenses(userProfile?.monthlyExpensesRange) ?? T.MONTHLY_EXPENSES
+  const annualIncome = parseAnnualIncome(userProfile?.incomeRange)
+  const financialGoals = userProfile?.financialGoals || []
 
   // Build category buckets, reclassifying stablecoins as cash
   const byCategory = {}
@@ -138,9 +149,9 @@ export function calculateWellnessScore(assets, options = {}) {
     ? W.cryptoExposure
     : clampScore(W.cryptoExposure * (1 - (volatileRatio - T.CRYPTO_MAX) / 0.7), W.cryptoExposure)
 
-  // --- Factor 4: Emergency Fund ---
+  // --- Factor 4: Emergency Fund (uses actual user expenses when available) ---
   const cashTotal = byCategory.CASH || 0
-  const monthsCovered = cashTotal / T.MONTHLY_EXPENSES
+  const monthsCovered = cashTotal / monthlyExpenses
   const emergencyScore = monthsCovered >= T.EMERGENCY_FUND_MONTHS
     ? W.emergencyFund
     : clampScore(W.emergencyFund * (monthsCovered / T.EMERGENCY_FUND_MONTHS), W.emergencyFund)
@@ -205,77 +216,180 @@ export function calculateWellnessScore(assets, options = {}) {
     ? W.rebalancingAlert
     : clampScore(W.rebalancingAlert * (1 - (maxDrift - T.REBALANCING_DRIFT_MAX) / 0.40), W.rebalancingAlert)
 
+  // --- Factor 10: Savings Rate (income vs expenses health) ---
+  let savingsScore
+  let savingsDetail = 'No income/expense data provided'
+  let savingsStatus = 'neutral'
+  if (annualIncome !== null) {
+    const monthlyIncome = annualIncome / 12
+    const monthlySavings = monthlyIncome - monthlyExpenses
+    const savingsRatio = monthlyIncome > 0 ? monthlySavings / monthlyIncome : 0
+    // Target: save at least 20% of income
+    const TARGET_SAVINGS_RATIO = 0.20
+    if (savingsRatio >= TARGET_SAVINGS_RATIO) {
+      savingsScore = W.savingsRate
+      savingsStatus = 'pass'
+    } else if (savingsRatio > 0) {
+      savingsScore = clampScore(W.savingsRate * (savingsRatio / TARGET_SAVINGS_RATIO), W.savingsRate)
+      savingsStatus = 'fail'
+    } else {
+      savingsScore = 0
+      savingsStatus = 'fail'
+    }
+    savingsDetail = `${(savingsRatio * 100).toFixed(0)}% of income saved monthly`
+  } else {
+    // Neutral when no data — half credit
+    savingsScore = Math.round(W.savingsRate * 0.5)
+    savingsStatus = 'neutral'
+  }
+
+  // --- Goal-specific hints ---
+  const goalHints = buildGoalHints(financialGoals, {
+    hasProperty: (byCategory.PROPERTY || 0) > 0,
+    emergencyMonths: monthsCovered,
+    targetEmergencyMonths: T.EMERGENCY_FUND_MONTHS,
+    debtRatio: debtToAssetRatio,
+    incomeRatio,
+    monthlyExpenses,
+  })
+
   const score = Math.max(0, Math.min(100,
     diversificationScore + liquidityScore + cryptoScore + emergencyScore +
-    concentrationScore + growthScore + incomeScore + debtScore + rebalanceScore
+    concentrationScore + growthScore + incomeScore + debtScore + rebalanceScore +
+    savingsScore
   ))
 
-  return {
-    score,
-    breakdown: [
-      {
-        label: 'Diversification',
-        score: diversificationScore,
-        max: W.diversification,
-        detail: `Largest category: ${(maxCategoryPct * 100).toFixed(1)}%`,
-        status: maxCategoryPct <= T.DIVERSIFICATION_MAX ? 'pass' : 'fail',
-      },
-      {
-        label: 'Liquidity',
-        score: liquidityScore,
-        max: W.liquidity,
-        detail: `Weighted liquidity: ${(liquidityRatio * 100).toFixed(1)}%`,
-        status: liquidityRatio >= T.LIQUIDITY_TARGET ? 'pass' : 'fail',
-      },
-      {
-        label: 'Volatility',
-        score: cryptoScore,
-        max: W.cryptoExposure,
-        detail: `Crypto + FOREX: ${(volatileRatio * 100).toFixed(1)}%`,
-        status: volatileRatio <= T.CRYPTO_MAX ? 'pass' : 'fail',
-      },
-      {
-        label: 'Emergency Fund',
-        score: emergencyScore,
-        max: W.emergencyFund,
-        detail: `${monthsCovered.toFixed(1)} months covered`,
-        status: monthsCovered >= T.EMERGENCY_FUND_MONTHS ? 'pass' : 'fail',
-      },
-      {
-        label: 'Concentration',
-        score: concentrationScore,
-        max: W.concentrationRisk,
-        detail: `Largest asset: ${(maxAssetPct * 100).toFixed(1)}%`,
-        status: maxAssetPct <= T.SINGLE_ASSET_MAX ? 'pass' : 'fail',
-      },
-      {
-        label: 'Growth Trend',
-        score: growthScore,
-        max: W.assetGrowthTrend,
-        detail: monthlyChangePct !== null ? `${monthlyChangePct >= 0 ? '+' : ''}${monthlyChangePct.toFixed(1)}% monthly` : 'No data yet',
-        status: monthlyChangePct === null ? 'neutral' : monthlyChangePct >= 0 ? 'pass' : 'fail',
-      },
-      {
-        label: 'Income Assets',
-        score: incomeScore,
-        max: W.incomeGenerating,
-        detail: `${(incomeRatio * 100).toFixed(1)}% income-gen${avgYield > 0 ? ` (${(avgYield * 100).toFixed(1)}% avg yield)` : ''}`,
-        status: incomeRatio >= T.INCOME_GENERATING_TARGET ? 'pass' : 'fail',
-      },
-      {
-        label: 'Debt Health',
-        score: debtScore,
-        max: W.debtHealth,
-        detail: totalDebt > 0 ? `${(debtToAssetRatio * 100).toFixed(1)}% debt ratio` : 'No debt recorded',
-        status: debtToAssetRatio <= T.DEBT_TO_ASSET_MAX ? 'pass' : 'fail',
-      },
-      {
-        label: 'Rebalancing',
-        score: rebalanceScore,
-        max: W.rebalancingAlert,
-        detail: `Max drift: ${(maxDrift * 100).toFixed(1)}%`,
-        status: maxDrift <= T.REBALANCING_DRIFT_MAX ? 'pass' : 'fail',
-      },
-    ],
+  const breakdown = [
+    {
+      label: 'Diversification',
+      score: diversificationScore,
+      max: W.diversification,
+      detail: `Largest category: ${(maxCategoryPct * 100).toFixed(1)}%`,
+      status: maxCategoryPct <= T.DIVERSIFICATION_MAX ? 'pass' : 'fail',
+      goalHint: goalHints.diversification || null,
+    },
+    {
+      label: 'Liquidity',
+      score: liquidityScore,
+      max: W.liquidity,
+      detail: `Weighted liquidity: ${(liquidityRatio * 100).toFixed(1)}%`,
+      status: liquidityRatio >= T.LIQUIDITY_TARGET ? 'pass' : 'fail',
+      goalHint: goalHints.liquidity || null,
+    },
+    {
+      label: 'Volatility',
+      score: cryptoScore,
+      max: W.cryptoExposure,
+      detail: `Crypto + FOREX: ${(volatileRatio * 100).toFixed(1)}%`,
+      status: volatileRatio <= T.CRYPTO_MAX ? 'pass' : 'fail',
+      goalHint: goalHints.volatility || null,
+    },
+    {
+      label: 'Emergency Fund',
+      score: emergencyScore,
+      max: W.emergencyFund,
+      detail: `${monthsCovered.toFixed(1)} months covered (based on S$${monthlyExpenses.toLocaleString()}/mo expenses)`,
+      status: monthsCovered >= T.EMERGENCY_FUND_MONTHS ? 'pass' : 'fail',
+      goalHint: goalHints.emergencyFund || null,
+    },
+    {
+      label: 'Concentration',
+      score: concentrationScore,
+      max: W.concentrationRisk,
+      detail: `Largest asset: ${(maxAssetPct * 100).toFixed(1)}%`,
+      status: maxAssetPct <= T.SINGLE_ASSET_MAX ? 'pass' : 'fail',
+      goalHint: goalHints.concentration || null,
+    },
+    {
+      label: 'Growth Trend',
+      score: growthScore,
+      max: W.assetGrowthTrend,
+      detail: monthlyChangePct !== null ? `${monthlyChangePct >= 0 ? '+' : ''}${monthlyChangePct.toFixed(1)}% monthly` : 'No data yet',
+      status: monthlyChangePct === null ? 'neutral' : monthlyChangePct >= 0 ? 'pass' : 'fail',
+      goalHint: goalHints.growthTrend || null,
+    },
+    {
+      label: 'Income Assets',
+      score: incomeScore,
+      max: W.incomeGenerating,
+      detail: `${(incomeRatio * 100).toFixed(1)}% income-gen${avgYield > 0 ? ` (${(avgYield * 100).toFixed(1)}% avg yield)` : ''}`,
+      status: incomeRatio >= T.INCOME_GENERATING_TARGET ? 'pass' : 'fail',
+      goalHint: goalHints.incomeAssets || null,
+    },
+    {
+      label: 'Debt Health',
+      score: debtScore,
+      max: W.debtHealth,
+      detail: totalDebt > 0 ? `${(debtToAssetRatio * 100).toFixed(1)}% debt ratio` : 'No debt recorded',
+      status: debtToAssetRatio <= T.DEBT_TO_ASSET_MAX ? 'pass' : 'fail',
+      goalHint: goalHints.debtHealth || null,
+    },
+    {
+      label: 'Rebalancing',
+      score: rebalanceScore,
+      max: W.rebalancingAlert,
+      detail: `Max drift: ${(maxDrift * 100).toFixed(1)}%`,
+      status: maxDrift <= T.REBALANCING_DRIFT_MAX ? 'pass' : 'fail',
+      goalHint: goalHints.rebalancing || null,
+    },
+    {
+      label: 'Savings Rate',
+      score: savingsScore,
+      max: W.savingsRate,
+      detail: savingsDetail,
+      status: savingsStatus,
+      goalHint: goalHints.savingsRate || null,
+    },
+  ]
+
+  return { score, breakdown, goalHints }
+}
+
+/**
+ * Build goal-specific hint strings based on the user's selected financial goals
+ * and current portfolio state.
+ */
+function buildGoalHints(goals, ctx) {
+  if (!goals || !goals.length) return {}
+  const hints = {}
+
+  if (goals.includes('Build emergency fund')) {
+    if (ctx.emergencyMonths < ctx.targetEmergencyMonths) {
+      const gap = Math.ceil((ctx.targetEmergencyMonths - ctx.emergencyMonths) * ctx.monthlyExpenses)
+      hints.emergencyFund = `Your goal: build emergency fund. ~S$${gap.toLocaleString()} more needed to reach ${ctx.targetEmergencyMonths}-month target.`
+    } else {
+      hints.emergencyFund = 'Your emergency fund goal is met — consider redirecting surplus to investments.'
+    }
   }
+
+  if (goals.includes('Pay down debt')) {
+    hints.debtHealth = ctx.debtRatio > 0.3
+      ? 'Your goal: pay down debt. Focus extra cash on highest-interest liabilities first.'
+      : 'Your goal: pay down debt. Debt ratio is manageable — maintain steady repayments.'
+  }
+
+  if (goals.includes('Buy a home')) {
+    if (!ctx.hasProperty) {
+      hints.savingsRate = 'Your goal: buy a home. Maximise savings rate to build a down-payment fund.'
+      hints.liquidity = 'Your goal: buy a home. Keep liquidity high for an upcoming down payment.'
+    } else {
+      hints.debtHealth = hints.debtHealth || 'You own property — consider accelerating mortgage repayment.'
+    }
+  }
+
+  if (goals.includes('Save for retirement')) {
+    hints.incomeAssets = 'Your goal: retire comfortably. Prioritise CPF top-ups, bonds, and dividend stocks.'
+    hints.growthTrend = hints.growthTrend || 'Long-term growth matters for retirement — stay invested through market cycles.'
+  }
+
+  if (goals.includes('Grow wealth')) {
+    hints.diversification = 'Your goal: grow wealth. Broad diversification protects long-term compounding.'
+    hints.growthTrend = 'Your goal: grow wealth. Consistent positive monthly growth is key.'
+  }
+
+  if (goals.includes('Generate passive income')) {
+    hints.incomeAssets = hints.incomeAssets || 'Your goal: passive income. Increase allocation to dividend stocks, REITs, and bonds.'
+  }
+
+  return hints
 }
