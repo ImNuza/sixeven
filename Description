@@ -1,8 +1,0 @@
-SafeSeven is an integrated Wealth Wellness Hub designed to unify traditional and digital assets, providing investors with a comprehensive, actionable view of their total financial health. Built as a full-stack web application with a React-based frontend and Node.js backend, it aggregates data from banks, exchanges, and crypto wallets (via APIs like Zerion and Coinbase) into a single dashboard.
-
-Key features include:
-1. Asset Management: Track and manage stocks, bonds, crypto, and cash across multiple accounts.
-2. Portfolio Insights: Real-time analytics on performance, diversification, and risk.
-3. Wellness Analytics: An 8-factor scoring system evaluating financial health, including liquidity, debt ratios, and investment alignment with goals.
-4. Scenario Simulation: Model "what-if" scenarios for retirement, market changes, or life events.
-5. Secure Integration: OAuth-based connections to financial institutions, encrypte data storage, and compliance with financial regulations.
