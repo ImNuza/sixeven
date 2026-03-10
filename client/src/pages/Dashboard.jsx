@@ -211,6 +211,8 @@ export default function Dashboard() {
   const [widgets, setWidgets] = useState(() => loadWidgets(user?.id))
   const [showCustomize, setShowCustomize] = useState(false)
   const [viewMode, setViewMode] = useState('client') // 'client' | 'advisor'
+  const [reviewReminderDay, setReviewReminderDay] = useState(null)
+  const [isSavingReviewDay, setIsSavingReviewDay] = useState(false)
 
   useEffect(() => {
     let cancelled = false
