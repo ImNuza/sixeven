@@ -986,8 +986,9 @@ function CursorScheduler() {
   const [phase, setPhase] = useState(0) // 0 hidden, 1 move-to-cell, 2 click, 3 move-save, 4 save, 5 reset
   const [stepIdx, setStepIdx] = useState(0)
   const containerRef = useRef(null)
-  const [cursorStyle, setCursorStyle] = useState({ opacity: 0, transform: 'translate(0px, 0px)' })
-  const PHASES = [0, 1, 2, 3, 4, 5]
+  const saveButtonRef = useRef(null)
+  const cellRefs = useRef({})
+  const [cursorTransform, setCursorTransform] = useState('translate(20px, 20px)')
 
   useEffect(() => {
     const durations = [600, 900, 500, 700, 900, 1200]
@@ -998,9 +999,34 @@ function CursorScheduler() {
   useEffect(() => {
     if (phase === 0) {
       setStepIdx(s => (s + 1) % SCHED_STEPS.length)
-      setCursorStyle({ opacity: 0, transform: 'translate(10px, 10px)' })
     }
   }, [phase])
+
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+
+    function setCursorToTarget(targetEl) {
+      if (!targetEl) return
+      const containerRect = container.getBoundingClientRect()
+      const targetRect = targetEl.getBoundingClientRect()
+      const x = targetRect.left - containerRect.left + (targetRect.width * 0.5) - 4
+      const y = targetRect.top - containerRect.top + (targetRect.height * 0.5) - 2
+      setCursorTransform(`translate(${x}px, ${y}px)`)
+    }
+
+    if (phase === 0 || phase === 5) {
+      setCursorTransform('translate(20px, 20px)')
+      return
+    }
+
+    if (phase <= 2) {
+      setCursorToTarget(cellRefs.current[`${activeStep.row}-${activeStep.col}`])
+      return
+    }
+
+    setCursorToTarget(saveButtonRef.current)
+  }, [activeStep, phase])
 
   const activeStep = SCHED_STEPS[stepIdx]
   const saveActive = phase === 4
@@ -1042,6 +1068,11 @@ function CursorScheduler() {
             return (
               <div
                 key={col}
+                ref={(node) => {
+                  if (node) {
+                    cellRefs.current[`${row}-${col}`] = node
+                  }
+                }}
                 className="flex aspect-square items-center justify-center rounded-lg text-xs font-medium transition-all duration-300"
                 style={{
                   fontFamily: T.mono,
@@ -1059,6 +1090,7 @@ function CursorScheduler() {
 
       {/* Save button */}
       <button
+        ref={saveButtonRef}
         className="mt-3 w-full rounded-xl py-2 text-xs font-semibold transition-all duration-400"
         style={{
           fontFamily: T.mono,
@@ -1080,11 +1112,7 @@ function CursorScheduler() {
           top: 0,
           left: 0,
           opacity: phase >= 1 && phase <= 4 ? 1 : 0,
-          transform: phase === 0
-            ? 'translate(20px, 20px)'
-            : phase <= 2
-              ? `translate(${28 + activeStep.col * 30}px, ${112 + activeStep.row * 26}px)`
-              : 'translate(110px, 178px)',
+          transform: cursorTransform,
           transition: 'transform 0.7s cubic-bezier(0.25, 0.46, 0.45, 0.94), opacity 0.35s ease',
         }}
       >
