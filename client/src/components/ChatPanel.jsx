@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Bot, Send, X, Sparkles, RefreshCw, AlertTriangle, ChevronRight } from 'lucide-react'
+import { Bot, Send, X, Sparkles, RefreshCw, AlertTriangle, ChevronRight, Plus } from 'lucide-react'
 import { useChat } from '../context/ChatContext'
 import { sendChatMessage } from '../services/api'
 
@@ -44,13 +44,27 @@ function Message({ msg }) {
 }
 
 export default function ChatPanel() {
-  const { isOpen, closeChat, pendingPrompt, setPendingPrompt, portfolioContext } = useChat()
-  const [messages, setMessages] = useState([])
+  const {
+    isOpen,
+    closeChat,
+    pendingPrompt,
+    setPendingPrompt,
+    portfolioContext,
+    tabs,
+    activeTab,
+    activeTabId,
+    setActiveTabId,
+    createTab,
+    deleteTab,
+    replaceActiveMessages,
+    clearActiveTab,
+  } = useChat()
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [disclaimerDismissed, setDisclaimerDismissed] = useState(false)
   const bottomRef = useRef(null)
   const inputRef = useRef(null)
+  const messages = activeTab?.messages || []
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -60,7 +74,7 @@ export default function ChatPanel() {
     if (isOpen) {
       setTimeout(() => inputRef.current?.focus(), 150)
     }
-  }, [isOpen])
+  }, [isOpen, activeTabId])
 
   useEffect(() => {
     if (isOpen && pendingPrompt) {
@@ -68,7 +82,7 @@ export default function ChatPanel() {
       handleSend(pendingPrompt)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, pendingPrompt])
+  }, [isOpen, pendingPrompt, activeTabId])
 
   async function handleSend(text) {
     const content = (text || input).trim()
@@ -77,14 +91,14 @@ export default function ChatPanel() {
 
     const userMsg = { role: 'user', content }
     const nextMessages = [...messages, userMsg]
-    setMessages(nextMessages)
+    replaceActiveMessages(nextMessages)
     setLoading(true)
 
     try {
       const { reply } = await sendChatMessage(nextMessages, portfolioContext)
-      setMessages(prev => [...prev, { role: 'assistant', content: reply }])
+      replaceActiveMessages([...nextMessages, { role: 'assistant', content: reply }])
     } catch (err) {
-      setMessages(prev => [...prev, {
+      replaceActiveMessages([...nextMessages, {
         role: 'assistant',
         content: `Sorry, I ran into an error: ${err.message}. Please try again.`,
       }])
@@ -112,12 +126,10 @@ export default function ChatPanel() {
         WebkitBackdropFilter: 'blur(28px)',
       }}
     >
-      {/* ── Header ─────────────────────────────────────────────── */}
       <div
         className="flex-shrink-0 px-4 pt-4 pb-3"
         style={{ borderBottom: '1px solid var(--app-border)' }}
       >
-        {/* Gradient bar */}
         <div
           className="absolute top-0 left-0 right-0 h-0.5 rounded-t"
           style={{ background: 'linear-gradient(90deg, var(--app-accent), #06b6d4, #818cf8)' }}
@@ -141,15 +153,15 @@ export default function ChatPanel() {
                 </span>
               </div>
               <p className="text-[10px] mt-0.5" style={{ color: 'var(--app-text-muted)' }}>
-                Qwen 70B · Financial Wellness Advisor
+                Qwen 2.5 7B · Financial Wellness Advisor
               </p>
             </div>
           </div>
           <div className="flex items-center gap-1">
             {messages.length > 0 && (
               <button
-                onClick={() => setMessages([])}
-                title="New conversation"
+                onClick={clearActiveTab}
+                title="Clear current conversation"
                 className="h-8 w-8 rounded-xl flex items-center justify-center transition-colors hover:bg-white/[0.06]"
                 style={{ color: 'var(--app-text-muted)' }}
               >
@@ -167,7 +179,48 @@ export default function ChatPanel() {
         </div>
       </div>
 
-      {/* ── Disclaimer banner ──────────────────────────────────── */}
+      <div className="flex-shrink-0 px-3 pt-3">
+        <div className="flex items-center gap-2 overflow-x-auto pb-1">
+          {tabs.map((tab) => (
+            <div
+              key={tab.id}
+              className="flex items-center gap-1 rounded-xl border px-2.5 py-1.5 flex-shrink-0"
+              style={{
+                borderColor: tab.id === activeTabId ? 'color-mix(in srgb, var(--app-accent) 55%, transparent)' : 'var(--app-border)',
+                background: tab.id === activeTabId ? 'var(--app-accent-soft)' : 'var(--app-surface)',
+              }}
+            >
+              <button
+                onClick={() => setActiveTabId(tab.id)}
+                className="text-[11px] font-medium truncate max-w-[112px]"
+                style={{ color: tab.id === activeTabId ? 'var(--app-accent)' : 'var(--app-text-soft)' }}
+                title={tab.title}
+              >
+                {tab.title}
+              </button>
+              {tabs.length > 1 && (
+                <button
+                  onClick={() => deleteTab(tab.id)}
+                  className="rounded-md p-0.5 transition-colors hover:bg-white/[0.06]"
+                  style={{ color: 'var(--app-text-muted)' }}
+                  title="Close chat tab"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+            </div>
+          ))}
+          <button
+            onClick={createTab}
+            className="flex h-8 w-8 items-center justify-center rounded-xl border flex-shrink-0 transition-colors hover:bg-white/[0.06]"
+            style={{ borderColor: 'var(--app-border)', color: 'var(--app-text-soft)', background: 'var(--app-surface)' }}
+            title="New chat tab"
+          >
+            <Plus className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
+
       {!disclaimerDismissed && (
         <div
           className="flex-shrink-0 mx-3 mt-3 rounded-2xl px-3.5 py-3"
@@ -197,11 +250,9 @@ export default function ChatPanel() {
         </div>
       )}
 
-      {/* ── Messages ───────────────────────────────────────────── */}
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
         {messages.length === 0 && (
           <div className="space-y-4">
-            {/* Welcome */}
             <div className="flex flex-col items-center text-center pt-2 pb-1 gap-2">
               <div
                 className="h-16 w-16 rounded-3xl flex items-center justify-center shadow-xl"
@@ -217,7 +268,6 @@ export default function ChatPanel() {
               </p>
             </div>
 
-            {/* Suggested questions */}
             <div>
               <p
                 className="text-[10px] font-semibold uppercase tracking-wider mb-2 px-0.5"
@@ -270,7 +320,7 @@ export default function ChatPanel() {
               style={{ background: 'var(--app-surface)', border: '1px solid var(--app-border)' }}
             >
               <div className="flex gap-1.5 items-center">
-                {[0, 1, 2].map(i => (
+                {[0, 1, 2].map((i) => (
                   <span
                     key={i}
                     className="h-1.5 w-1.5 rounded-full animate-bounce"
@@ -285,7 +335,6 @@ export default function ChatPanel() {
         <div ref={bottomRef} />
       </div>
 
-      {/* ── Input ──────────────────────────────────────────────── */}
       <div
         className="flex-shrink-0 px-3 pt-2 pb-3"
         style={{ borderTop: '1px solid var(--app-border)' }}
@@ -300,7 +349,7 @@ export default function ChatPanel() {
           <textarea
             ref={inputRef}
             value={input}
-            onChange={e => setInput(e.target.value)}
+            onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Ask about your portfolio…"
             rows={1}
