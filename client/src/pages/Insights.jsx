@@ -482,7 +482,7 @@ export default function Insights() {
       </div>
 
       {/* ── Section 5: Scenario Lab ──────────────────────────── */}
-      <ScenarioSimulator assets={assets} />
+      <ScenarioSimulator assets={assets} summary={summary} />
 
     </div>
   )
