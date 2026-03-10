@@ -135,6 +135,23 @@ export default function Assets() {
 
   useEffect(() => { setPage(1) }, [debouncedSearch, categoryFilter, pricingFilter])
 
+  // Detect if we're coming from onboarding with refresh flag
+  useEffect(() => {
+    const refreshParam = searchParams.get('refresh')
+    if (refreshParam === 'true') {
+      console.log('[Assets] Detected onboarding refresh flag, clearing cache and reloading')
+      // Remove the refresh parameter from URL
+      const newParams = {}
+      if (search) newParams.search = search
+      if (categoryFilter !== 'ALL') newParams.category = categoryFilter
+      if (pricingFilter !== 'ALL') newParams.pricing = pricingFilter
+      if (sortBy !== 'value') newParams.sortBy = sortBy
+      if (sortDirection !== 'desc') newParams.sortDirection = sortDirection
+      if (page > 1) newParams.page = String(page)
+      setSearchParams(newParams, { replace: true })
+    }
+  }, [])
+
   useEffect(() => {
     let cancelled = false
 
@@ -142,17 +159,23 @@ export default function Assets() {
       try {
         if (showSpinner) setLoading(true)
         setError('')
+        console.log('[Assets] Loading assets...', { page, pageSize: pagination.pageSize, search: debouncedSearch, category: categoryFilter })
         const [assetResult, priceRows] = await Promise.all([
           fetchAssetsPage({ page, pageSize: pagination.pageSize, search: debouncedSearch, category: categoryFilter, pricing: pricingFilter, sortBy, sortDirection }),
           fetchPrices(),
         ])
         if (cancelled) return
+        console.log('[Assets] ✓ Loaded', assetResult.items.length, 'assets')
+        assetResult.items.forEach(a => {
+          console.log('[Assets]   -', a.name, '(' + a.category + '):', '$' + a.value)
+        })
         setAssets(assetResult.items)
         setPagination(assetResult.pagination)
         if (assetResult.pagination.totalPages > 0 && page > assetResult.pagination.totalPages)
           setPage(assetResult.pagination.totalPages)
         setPrices(priceRows)
       } catch (err) {
+        console.error('[Assets] ✗ Failed to load assets:', err.message)
         if (!cancelled) setError(err.message || 'Failed to load assets.')
       } finally {
         if (!cancelled && showSpinner) setLoading(false)

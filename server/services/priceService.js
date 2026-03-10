@@ -13,8 +13,19 @@ async function getCryptoPrices(coinIds) {
 
   const ids = coinIds.join(',')
   const url = `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd,sgd`
-  const { data } = await axios.get(url, { timeout: 10000 })
-  return data
+  try {
+    const { data } = await axios.get(url, { 
+      timeout: 10000,
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+    })
+    return data
+  } catch (err) {
+    console.error('[CoinGecko Error]', err.message || err.code)
+    if (err.response) {
+      console.error('  Status:', err.response.status, 'Data:', err.response.data)
+    }
+    throw err
+  }
 }
 
 async function getStockPriceAlphaVantage(ticker) {
@@ -29,34 +40,63 @@ async function getStockPriceAlphaVantage(ticker) {
 
 async function getStockPriceYahoo(ticker) {
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1d`
-  const { data } = await axios.get(url, {
-    timeout: 10000,
-    headers: { 'User-Agent': 'Mozilla/5.0' },
-  })
-  const result = data?.chart?.result?.[0]
-  if (!result) {
-    return null
+  try {
+    const { data } = await axios.get(url, {
+      timeout: 10000,
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+    })
+    const result = data?.chart?.result?.[0]
+    if (!result) {
+      console.warn(`[Yahoo Finance] No result for ${ticker}`)
+      return null
+    }
+    return result.meta?.regularMarketPrice || null
+  } catch (err) {
+    console.error(`[Yahoo Finance ${ticker}]`, err.message || err.code)
+    if (err.response?.status === 404) {
+      console.error('  Symbol not found')
+    } else if (err.code === 'ECONNREFUSED') {
+      console.error('  Connection refused')
+    } else if (err.response) {
+      console.error('  Status:', err.response.status)
+    }
+    throw err
   }
-  return result.meta?.regularMarketPrice || null
 }
 
 async function getUsdSgdRate() {
   try {
     const price = await getStockPriceYahoo('USDSGD=X')
     return price || 1.35
-  } catch {
+  } catch (err) {
+    console.error('[USD/SGD Rate] Failed, using fallback 1.35', err.message)
     return 1.35
   }
 }
 
 async function upsertPrice(client, symbol, priceUsd, priceSgd) {
-  await client.query(
-    `INSERT INTO price_cache (symbol, price_usd, price_sgd, updated_at)
-     VALUES ($1, $2, $3, NOW())
-     ON CONFLICT (symbol) DO UPDATE
-     SET price_usd = $2, price_sgd = $3, updated_at = NOW()`,
-    [symbol, priceUsd, priceSgd]
-  )
+  try {
+    // Try PostgreSQL syntax first
+    await client.query(
+      `INSERT INTO price_cache (symbol, price_usd, price_sgd, updated_at)
+       VALUES ($1, $2, $3, NOW())
+       ON CONFLICT (symbol) DO UPDATE
+       SET price_usd = $2, price_sgd = $3, updated_at = NOW()`,
+      [symbol, priceUsd, priceSgd]
+    )
+  } catch (err) {
+    if (err.message?.includes('CONFLICT') || err.message?.includes('syntax')) {
+      // SQLite fallback: use INSERT OR REPLACE
+      console.log(`[Price Cache] Using SQLite upsert for ${symbol}`)
+      await client.query(
+        `INSERT OR REPLACE INTO price_cache (symbol, price_usd, price_sgd, updated_at)
+         VALUES ($1, $2, $3, datetime('now'))`,
+        [symbol, priceUsd, priceSgd]
+      )
+    } else {
+      throw err
+    }
+  }
 }
 
 async function updateAssetValue(client, assetId, priceSgd, quantity) {
@@ -106,7 +146,8 @@ async function refreshUserPricesInternal(userId, snapshotSource = 'price_refresh
           await upsertPrice(client, geckoId, priceUsd, priceSgd)
           await updateAssetValue(client, asset.id, priceSgd, parseFloat(asset.quantity))
         }
-      } catch {
+      } catch (err) {
+        console.error('[CoinGecko Refresh] Error updating crypto prices:', err.message)
         // Keep the refresh moving if CoinGecko is unavailable.
       }
     }
@@ -118,7 +159,8 @@ async function refreshUserPricesInternal(userId, snapshotSource = 'price_refresh
         // Yahoo Finance first — unlimited, no API key needed
         try {
           priceNative = await getStockPriceYahoo(asset.ticker)
-        } catch {
+        } catch (err) {
+          console.log(`[Stock ${asset.ticker}] Yahoo Finance failed, trying fallback...`)
           priceNative = null
         }
 
@@ -126,12 +168,14 @@ async function refreshUserPricesInternal(userId, snapshotSource = 'price_refresh
         if (!priceNative && ALPHA_VANTAGE_KEY) {
           try {
             priceNative = await getStockPriceAlphaVantage(asset.ticker)
-          } catch {
+          } catch (err) {
+            console.log(`[Stock ${asset.ticker}] Alpha Vantage also failed`)
             priceNative = null
           }
         }
 
         if (!priceNative) {
+          console.warn(`[Stock ${asset.ticker}] Could not fetch price from any source`)
           return
         }
 
@@ -141,7 +185,8 @@ async function refreshUserPricesInternal(userId, snapshotSource = 'price_refresh
 
         await upsertPrice(client, asset.ticker, priceUsd, priceSgd)
         await updateAssetValue(client, asset.id, priceSgd, parseFloat(asset.quantity))
-      } catch {
+      } catch (err) {
+        console.error(`[Stock ${asset.ticker}] Update failed:`, err.message)
         // Skip symbols that fail during a refresh cycle.
       }
     }))

@@ -66,6 +66,9 @@ export function validateAssetPayload(payload = {}) {
     if (!String(details.address || '').trim()) {
       errors.push('Property assets require an address or location.')
     }
+    if (!String(details.postalCode || '').trim()) {
+      errors.push('Property assets require a postal code.')
+    }
     if (!isOptionalNonNegativeNumber(details.remainingLoan)) {
       errors.push('Remaining loan must be 0 or greater.')
     }

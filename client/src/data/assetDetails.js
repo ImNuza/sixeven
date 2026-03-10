@@ -34,6 +34,12 @@ export const CATEGORY_DETAIL_CONFIG = {
         placeholder: 'Tampines, Singapore',
       },
       {
+        key: 'postalCode',
+        label: 'Postal Code',
+        type: 'text',
+        placeholder: '123456',
+      },
+      {
         key: 'tenureType',
         label: 'Tenure',
         type: 'select',

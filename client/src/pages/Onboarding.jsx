@@ -10,6 +10,7 @@ import {
   fetchMoomooPositions,
   fetchMomooDemoPositions,
   fetchSingpassAuthUrl,
+  lookupExchangeRate,
   lookupPropertyByPostcode,
   saveWalletConnection,
   updateProfile,
@@ -305,9 +306,22 @@ async function persistPortfolioAssets(values, propertyLookup) {
     } : null,
   ].filter(Boolean)
 
+  console.log('[Onboarding] Creating portfolio assets:', assets.length, 'items')
+  
+  const createdAssets = []
   for (const asset of assets) {
-    await createAsset(asset)
+    try {
+      const created = await createAsset(asset)
+      console.log('[Onboarding] ✓ Created asset:', asset.name, '(' + asset.category + ')', 'Value:', asset.value)
+      createdAssets.push(created)
+    } catch (err) {
+      console.error('[Onboarding] ✗ Failed to create asset:', asset.name, err.message)
+      throw new Error(`Failed to create ${asset.name}: ${err.message}`)
+    }
   }
+  
+  console.log('[Onboarding] Portfolio assets completed:', createdAssets.length, 'successful')
+  return createdAssets
 }
 
 async function importMoomooPortfolio(payload) {
@@ -316,24 +330,43 @@ async function importMoomooPortfolio(payload) {
     : await fetchMoomooPositions(payload.openDUrl)
 
   const today = new Date().toISOString().split('T')[0]
+  
+  console.log('[Onboarding] Importing moomoo portfolio:', data.positions?.length || 0, 'positions')
+  
   for (const position of data.positions || []) {
-    const isSgd = position.currency === 'SGD'
-    const rate = isSgd ? 1 : 1.35
-    await createAsset({
-      name: position.name || position.ticker,
-      category: 'STOCKS',
-      ticker: position.ticker,
-      quantity: position.quantity,
-      value: Math.round(position.marketValue * rate * 100) / 100,
-      cost: position.avgCost > 0 ? Math.round(position.avgCost * position.quantity * rate * 100) / 100 : Math.round(position.marketValue * rate * 100) / 100,
-      date: today,
-      institution: payload.source === 'demo' ? 'moomoo SG (Demo)' : 'moomoo SG',
-      details: {
-        importedFrom: 'moomoo',
-        currency: position.currency,
-        originalCode: position.code,
-      },
-    })
+    try {
+      const isSgd = position.currency === 'SGD'
+      let rate = 1
+      if (!isSgd) {
+        try {
+          rate = await lookupExchangeRate(position.currency, 'SGD')
+          console.log('[Onboarding] Fetched FX rate:', position.currency, '/SGD =', rate)
+        } catch (err) {
+          console.warn('[Onboarding] Failed to fetch FX rate for', position.currency, ', using fallback 1.35')
+          rate = 1.35
+        }
+      }
+      
+      await createAsset({
+        name: position.name || position.ticker,
+        category: 'STOCKS',
+        ticker: position.ticker,
+        quantity: position.quantity,
+        value: Math.round(position.marketValue * rate * 100) / 100,
+        cost: position.avgCost > 0 ? Math.round(position.avgCost * position.quantity * rate * 100) / 100 : Math.round(position.marketValue * rate * 100) / 100,
+        date: today,
+        institution: payload.source === 'demo' ? 'moomoo SG (Demo)' : 'moomoo SG',
+        details: {
+          importedFrom: 'moomoo',
+          currency: position.currency,
+          originalCode: position.code,
+          conversionRate: rate,
+        },
+      })
+      console.log('[Onboarding] ✓ Imported moomoo position:', position.name, '(' + position.currency + ')', 'Value SGD:', Math.round(position.marketValue * rate * 100) / 100)
+    } catch (err) {
+      console.error('[Onboarding] ✗ Failed to import moomoo position:', position.name, err.message)
+    }
   }
 
   return data
@@ -543,8 +576,10 @@ export default function Onboarding() {
         }
       }
       await persistPortfolioAssets(values, propertyLookupState.data)
+      console.log('[Onboarding] ✓ All onboarding steps complete')
       setCompleted(true)
     } catch (err) {
+      console.error('[Onboarding] ✗ Onboarding failed:', err)
       setError(err.message || 'We could not complete onboarding. Please try again.')
     } finally {
       setSaving(false)
@@ -864,9 +899,14 @@ export default function Onboarding() {
           <p style={{ color: 'rgba(255,255,255,0.45)', marginBottom: '1.8rem' }}>
             Estimated assets captured: {formatCurrency(onboardingProfile.estimatedNetWorthTracked)}
           </p>
-          <button type="button" onClick={() => navigate('/dashboard', { replace: true })} style={buttonStyle(true)}>
-            Open My Dashboard <ArrowRight size={16} />
-          </button>
+          <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', justifyContent: 'center' }}>
+            <button type="button" onClick={() => { console.log('[Onboarding] Navigating to assets with refresh flag'); setTimeout(() => navigate('/assets?refresh=true', { replace: true }), 500) }} style={buttonStyle(true)}>
+              View My Assets <ArrowRight size={16} />
+            </button>
+            <button type="button" onClick={() => navigate('/dashboard', { replace: true })} style={buttonStyle(false)}>
+              Go to Dashboard
+            </button>
+          </div>
         </div>
       </div>
     )

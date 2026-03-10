@@ -51,6 +51,14 @@ function validateForm(values) {
     return 'Current value must be 0 or greater.'
   }
 
+  if (values.category === 'CPF' && !values.details.accountType) {
+    return 'Account type is required for CPF assets.'
+  }
+
+  if (values.category === 'PROPERTY' && !values.details.postalCode) {
+    return 'Postal code is required for property assets.'
+  }
+
   return validateCategoryDetails(values.category, values.details)
 }
 
@@ -85,6 +93,16 @@ export default function AssetForm({
     setValues(buildInitialValues(initialAsset))
     setValidationError('')
   }, [initialAsset])
+
+  useEffect(() => {
+    if (values.category === 'PROPERTY' && values.details.postalCode && /^\d{6}$/.test(values.details.postalCode)) {
+      // Mock estimated price based on postal code
+      const basePrice = 500000
+      const multiplier = (parseInt(values.details.postalCode.slice(0, 2)) / 10) + 1
+      const estimatedPrice = Math.round(basePrice * multiplier)
+      setValues(current => ({ ...current, value: estimatedPrice.toString() }))
+    }
+  }, [values.category, values.details.postalCode])
 
   const isPricedAsset = useMemo(
     () => PRICED_CATEGORIES.has(values.category),

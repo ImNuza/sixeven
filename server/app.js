@@ -36,6 +36,42 @@ const MYINFO_ATTRS = 'name,sex,dob,birthcountry,residentialstatus,cpfbalances,cp
 
 const pkceStore = new Map() // in-memory: state → { codeVerifier, userId }
 
+// ── Property lookup cache (24-hour TTL) ────────────────────────
+const propertyCache = new Map() // postcode → { data, timestamp }
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000 // 24 hours
+
+function getCachedProperty(postcode) {
+  const cached = propertyCache.get(postcode)
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+    console.log(`[Cache HIT] Postcode ${postcode}`)
+    return cached.data
+  }
+  if (cached) propertyCache.delete(postcode) // Expired
+  return null
+}
+
+function setCachedProperty(postcode, data) {
+  propertyCache.set(postcode, { data, timestamp: Date.now() })
+  console.log(`[Cache SET] Postcode ${postcode}`)
+}
+
+// ── Retry helper for rate-limited requests ─────────────────────
+async function axiosWithRetry(config, maxRetries = 3, backoffMs = 1000) {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await axios(config)
+    } catch (err) {
+      if (err.response?.status === 429 && attempt < maxRetries) {
+        const waitTime = backoffMs * Math.pow(2, attempt - 1)
+        console.warn(`[Rate Limited] Attempt ${attempt}/${maxRetries}, waiting ${waitTime}ms`)
+        await new Promise(resolve => setTimeout(resolve, waitTime))
+        continue
+      }
+      throw err
+    }
+  }
+}
+
 async function makeMyInfoClientAssertion(appId, tokenUrl, privateKeyPem) {
   const key = await importPKCS8(privateKeyPem, 'RS256')
   return new SignJWT({})
@@ -627,6 +663,12 @@ HARD RULES:
       return res.status(400).json({ error: 'Enter a valid 6-digit Singapore postcode.' })
     }
 
+    // Check cache first
+    const cachedData = getCachedProperty(postcode)
+    if (cachedData) {
+      return res.json(cachedData)
+    }
+
     try {
       const oneMapRes = await axios.get('https://www.onemap.gov.sg/api/common/elastic/search', {
         params: {
@@ -646,57 +688,130 @@ HARD RULES:
       const block = String(result.BLK_NO || '').trim()
       const street = String(result.ROAD_NAME || '').trim().toUpperCase()
       let hdb = null
+      let ura = null
 
       try {
-        const hdbRes = await axios.get('https://data.gov.sg/api/action/package_show', {
-          params: { id: 'resale-flat-prices' },
-          timeout: 12000,
-        })
-        const csvResource = (hdbRes.data?.result?.resources || []).find(
-          (resource) => /resale flat prices/i.test(resource.name || '') && resource.url
-        )
-
-        if (csvResource?.url && block && street) {
-          const csvRes = await axios.get(csvResource.url, { timeout: 20000 })
-          const lines = String(csvRes.data || '').split(/\r?\n/).filter(Boolean)
-          const header = lines[0]?.split(',').map((cell) => cell.replace(/^"|"$/g, '').trim().toLowerCase()) || []
-          const blockIdx = header.indexOf('block')
-          const streetIdx = header.indexOf('street_name')
-          const monthIdx = header.indexOf('month')
-          const typeIdx = header.indexOf('flat_type')
-          const modelIdx = header.indexOf('flat_model')
-          const areaIdx = header.indexOf('floor_area_sqm')
-          const priceIdx = header.indexOf('resale_price')
-
-          const matches = lines.slice(1)
-            .map((line) => line.match(/(".*?"|[^",]+)(?=,|$)/g)?.map((cell) => cell.replace(/^"|"$/g, '').trim()) || [])
-            .filter((cells) =>
-              String(cells[blockIdx] || '').trim() === block &&
-              String(cells[streetIdx] || '').trim().toUpperCase() === street
-            )
-            .slice(-5)
-
-          if (matches.length) {
-            const latest = matches[matches.length - 1]
-            hdb = {
-              latestMonth: latest[monthIdx] || null,
-              latestResalePrice: Number(latest[priceIdx] || 0) || null,
-              flatType: latest[typeIdx] || null,
-              flatModel: latest[modelIdx] || null,
-              floorAreaSqm: Number(latest[areaIdx] || 0) || null,
-              comparableSales: matches.map((cells) => ({
-                month: cells[monthIdx] || null,
-                resalePrice: Number(cells[priceIdx] || 0) || null,
-                flatType: cells[typeIdx] || null,
-              })).filter((sale) => sale.resalePrice),
+        // Fetch HDB resale price data directly from data.gov.sg API (not CSV)
+        // Using the REST API to query the datastore instead of downloading CSV
+        
+        // Try to fetch from the datastore_search API for resale flat prices
+        // Resource ID for "Resale flat prices based on registration date from Jan 2017 onwards"
+        const resourceIds = [
+          'd_8b84c4c2458efd51642fb1f27835d5a1', // Jan 2017 onwards (main dataset)
+          '1b702208-44bf-4829-b620-4615ee19b57f', // Alternative format
+        ]
+        
+        let records = []
+        for (const resourceId of resourceIds) {
+          try {
+            const apiRes = await axiosWithRetry({
+              method: 'get',
+              url: 'https://data.gov.sg/api/action/datastore_search',
+              params: {
+                resource_id: resourceId,
+                filters: JSON.stringify({
+                  block: [block],
+                  street_name: [street]
+                }),
+                sort: 'month desc',
+                limit: 100,
+              },
+              timeout: 15000,
+            })
+            records = apiRes.data?.result?.records || []
+            if (records.length > 0) {
+              console.log(`Found ${records.length} records from resource ${resourceId}`)
+              break
             }
+          } catch (err) {
+            console.warn(`Resource ${resourceId} failed: ${err.message}`)
+            continue
           }
         }
-      } catch {
+        
+        // Fallback: Try fetching without exact filters if the strict query returned nothing
+        if (records.length === 0) {
+          try {
+            const fallbackRes = await axiosWithRetry({
+              method: 'get',
+              url: 'https://data.gov.sg/api/action/datastore_search',
+              params: {
+                resource_id: 'd_8b84c4c2458efd51642fb1f27835d5a1',
+                q: `${block} ${street}`,
+                sort: 'month desc',
+                limit: 100,
+              },
+              timeout: 15000,
+            })
+            records = fallbackRes.data?.result?.records || []
+            console.log(`Fallback search found ${records.length} records`)
+          } catch (err) {
+            console.warn(`Fallback search failed: ${err.message}`)
+          }
+        }
+
+        // Fetch HDB Price Index for trend validation
+        let priceIndex = null
+        try {
+          const indexRes = await axiosWithRetry({
+            method: 'get',
+            url: 'https://data.gov.sg/api/action/datastore_search',
+            params: {
+              resource_id: 'd_14f63e595975691e7c24a27ae4c07c79',
+              limit: 20,
+              sort: 'quarter desc'
+            },
+            timeout: 10000,
+          })
+          const indexRecords = indexRes.data?.result?.records || []
+          if (indexRecords.length > 0) {
+            priceIndex = {
+              records: indexRecords.slice(0, 4),
+              latestQuarter: indexRecords[0]?.quarter || null,
+              latestIndex: Number(indexRecords[0]?.index || 0) || null,
+            }
+            console.log(`HDB Price Index: latest=${priceIndex.latestQuarter}, index=${priceIndex.latestIndex}`)
+          }
+        } catch (indexErr) {
+          console.warn('HDB price index fetch failed:', indexErr.message)
+        }
+
+        if (records.length > 0) {
+          // Filter by room type to find comparable sales
+          const comparableSales = records
+            .filter(r => r.resale_price && Number(r.resale_price) > 0)
+            .slice(0, 10)
+            .map(r => ({
+              month: r.month || null,
+              resalePrice: Number(r.resale_price) || null,
+              flatType: r.flat_type || null,
+              storey: r.storey_range || null,
+            }))
+
+          if (comparableSales.length > 0) {
+            const latest = records[0]
+            hdb = {
+              latestMonth: latest.month || null,
+              latestResalePrice: Number(latest.resale_price) || null,
+              flatType: latest.flat_type || null,
+              flatModel: latest.flat_model || null,
+              floorAreaSqm: Number(latest.floor_area_sqm) || null,
+              comparableSales: comparableSales,
+              priceIndex: priceIndex,
+            }
+            console.log(`HDB data: latestPrice=${hdb.latestResalePrice}, comparableSales=${comparableSales.length}, flatTypes=[${comparableSales.map(s => s.flatType).join(', ')}]`)
+          }
+        } else {
+          console.log(`No HDB records found for block=${block}, street=${street}`)
+        }
+      } catch (err) {
+        console.error('HDB lookup error:', err.message)
         hdb = null
       }
 
-      res.json({
+      // URA lookup disabled for now (too slow) - ura remains null
+
+      const responseData = {
         postcode,
         address: [result.BLK_NO, result.ROAD_NAME, result.BUILDING].filter(Boolean).join(' '),
         block: result.BLK_NO || null,
@@ -706,8 +821,14 @@ HARD RULES:
         longitude: result.LONGITUDE || null,
         town: result.PLANNING_AREA || null,
         hdb,
-      })
+        ura,
+      }
+
+      // Cache the response before returning
+      setCachedProperty(postcode, responseData)
+      res.json(responseData)
     } catch (err) {
+      console.error('Property lookup error:', err.message)
       res.status(502).json({ error: err.message || 'Property lookup failed.' })
     }
   })
@@ -900,32 +1021,46 @@ HARD RULES:
         const { SYMBOL_TO_COINGECKO_ID } = await import('../shared/constants.js')
         const upper = symbol.toUpperCase()
         const geckoId = SYMBOL_TO_COINGECKO_ID[upper] || symbol.toLowerCase()
+        console.log(`[Crypto Lookup] ${upper} → ${geckoId}`)
         const { data } = await axios.get(
           `https://api.coingecko.com/api/v3/simple/price?ids=${geckoId}&vs_currencies=usd,sgd`,
-          { timeout: 8000 }
+          { 
+            timeout: 8000,
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+          }
         )
         const coinData = data[geckoId]
         if (!coinData) return res.status(404).json({ error: 'Token not found on CoinGecko' })
+        console.log(`[Crypto Lookup] ${upper}: USD ${coinData.usd}, SGD ${coinData.sgd}`)
         return res.json({ symbol: upper, geckoId, priceUsd: coinData.usd, priceSgd: coinData.sgd, type: 'crypto' })
       }
 
       const upper = symbol.toUpperCase()
+      console.log(`[Stock Lookup] Fetching ${upper}...`)
       const { data } = await axios.get(
         `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(upper)}?interval=1d&range=1d`,
-        { timeout: 8000, headers: { 'User-Agent': 'Mozilla/5.0' } }
+        { timeout: 8000, headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' } }
       )
       const result = data?.chart?.result?.[0]
-      if (!result) return res.status(404).json({ error: 'Symbol not found' })
+      if (!result) {
+        console.warn(`[Stock Lookup] ${upper}: No chart result`)
+        return res.status(404).json({ error: 'Symbol not found' })
+      }
 
       const price = result.meta?.regularMarketPrice
       const currency = result.meta?.currency || 'USD'
       const name = result.meta?.longName || result.meta?.shortName || upper
+      console.log(`[Stock Lookup] ${upper}: ${currency} ${price}`)
 
       const fxResp = await axios.get(
         'https://query1.finance.yahoo.com/v8/finance/chart/USDSGD=X?interval=1d&range=1d',
-        { timeout: 5000, headers: { 'User-Agent': 'Mozilla/5.0' } }
-      ).catch(() => null)
+        { timeout: 5000, headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' } }
+      ).catch((err) => {
+        console.warn('[FX Lookup] USD/SGD failed:', err.message)
+        return null
+      })
       const usdSgd = fxResp?.data?.chart?.result?.[0]?.meta?.regularMarketPrice || 1.35
+      console.log(`[FX Lookup] USD/SGD: ${usdSgd}`)
 
       const isSgx = upper.endsWith('.SI')
       const priceSgd = isSgx ? price : price * usdSgd
@@ -933,6 +1068,9 @@ HARD RULES:
 
       res.json({ symbol: upper, name, price, currency, priceUsd, priceSgd, usdSgd, type: 'stock' })
     } catch (err) {
+      console.error(`[Price Lookup ${symbol}] ${err.message}`)
+      if (err.response?.status) console.error('  Status:', err.response.status)
+      if (err.code) console.error('  Code:', err.code)
       res.status(500).json({ error: err.message || 'Price lookup failed' })
     }
   })
