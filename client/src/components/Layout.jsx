@@ -59,6 +59,8 @@ export default function Layout() {
   const [floatingPosition, setFloatingPosition] = useState(() => loadFloatingPosition(user?.id))
   const [dragState, setDragState] = useState(null)
   const buttonRef = useRef(null)
+  const dragMetaRef = useRef(null)
+  const suppressClickRef = useRef(false)
 
   useEffect(() => {
     setFloatingPosition(loadFloatingPosition(user?.id))
@@ -81,23 +83,22 @@ export default function Layout() {
       const maxY = window.innerHeight - rect.height - FLOATING_CHAT_MARGIN
       const x = clamp(event.clientX - dragState.offsetX, FLOATING_CHAT_MARGIN, maxX)
       const y = clamp(event.clientY - dragState.offsetY, FLOATING_CHAT_MARGIN, maxY)
-      setDragState((current) => current ? { ...current, x, y, moved: true } : current)
+      const moved = Math.abs(x - dragState.startX) > 6 || Math.abs(y - dragState.startY) > 6
+      dragMetaRef.current = { moved }
+      setDragState((current) => current ? { ...current, x, y, moved } : current)
     }
 
     function handlePointerUp() {
       setDragState((current) => {
         if (!current) return null
-
-        if (!current.moved) {
-          toggleChat()
-          return null
-        }
+        suppressClickRef.current = Boolean(dragMetaRef.current?.moved)
 
         const centerX = current.x + current.rect.width / 2
         const centerY = current.y + current.rect.height / 2
         const horizontal = centerX < window.innerWidth / 2 ? 'left' : 'right'
         const vertical = centerY < window.innerHeight / 2 ? 'top' : 'bottom'
         setFloatingPosition(`${vertical}-${horizontal}`)
+        dragMetaRef.current = null
         return null
       })
     }
@@ -109,27 +110,31 @@ export default function Layout() {
       window.removeEventListener('pointermove', handlePointerMove)
       window.removeEventListener('pointerup', handlePointerUp)
     }
-  }, [dragState, toggleChat])
+  }, [dragState])
 
   function handleFloatingPointerDown(event) {
     const rect = buttonRef.current?.getBoundingClientRect()
     if (!rect) return
 
+    dragMetaRef.current = { moved: false }
     setDragState({
       rect,
       offsetX: event.clientX - rect.left,
       offsetY: event.clientY - rect.top,
       x: rect.left,
       y: rect.top,
+      startX: rect.left,
+      startY: rect.top,
       moved: false,
     })
   }
 
-  function handleFloatingKeyDown(event) {
-    if (event.key === 'Enter' || event.key === ' ') {
-      event.preventDefault()
-      toggleChat()
+  function handleFloatingClick() {
+    if (suppressClickRef.current) {
+      suppressClickRef.current = false
+      return
     }
+    toggleChat()
   }
 
   return (
@@ -152,7 +157,7 @@ export default function Layout() {
         <button
           ref={buttonRef}
           onPointerDown={handleFloatingPointerDown}
-          onKeyDown={handleFloatingKeyDown}
+          onClick={handleFloatingClick}
           className="fixed bottom-6 right-6 z-[150] flex items-center gap-2 px-4 py-2.5 rounded-full text-sm font-semibold text-white transition-all hover:scale-105 active:scale-95"
           style={{
             ...(dragState
