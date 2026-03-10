@@ -782,11 +782,20 @@ function WellnessContent({ breakdown, healthStatus, score }) {
             <div className="flex items-center justify-between mb-1.5">
               <div className="flex items-center gap-2">
                 <span className="text-sm font-medium" style={{ color: 'var(--app-text-soft)' }}>{item.label}</span>
-                <span className="relative group/tip cursor-help">
+                <span className="relative group/tip cursor-help z-20">
                   <Info className="h-3.5 w-3.5" style={{ color: 'var(--app-text-muted)', opacity: 0.7 }} />
-                  {/* Enhanced, high-contrast tooltip */}
-                  <div className="pointer-events-none absolute left-6 top-1/2 opacity-0 group-hover/tip:opacity-100 transition-opacity w-60 rounded-xl px-3.5 py-3 text-xs shadow-2xl overflow-visible"
-                    style={{ background: 'rgba(0, 0, 0, 0.85)', border: '1px solid rgba(255, 255, 255, 0.2)', color: '#e8e8e8', lineHeight: '1.6', backdropFilter: 'blur(8px)', transform: 'translateY(-50%)', maxHeight: 'none', zIndex: 9999 }}>
+                  <div
+                    className="pointer-events-none absolute left-1/2 bottom-full mb-3 -translate-x-1/2 opacity-0 group-hover/tip:opacity-100 transition-opacity w-64 rounded-xl px-3.5 py-3 text-xs shadow-2xl"
+                    style={{
+                      background: 'rgba(0, 0, 0, 0.88)',
+                      border: '1px solid rgba(255, 255, 255, 0.2)',
+                      color: '#e8e8e8',
+                      lineHeight: '1.6',
+                      backdropFilter: 'blur(8px)',
+                      maxHeight: 'none',
+                      zIndex: 9999,
+                    }}
+                  >
                     {/* Current value */}
                     <p className="mb-2.5 pb-2.5" style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.15)', color: item.status === 'pass' ? '#22c55e' : item.status === 'neutral' ? '#3b82f6' : '#ef4444', fontWeight: '600', fontSize: '0.8rem' }}>
                       {item.currentValue}
@@ -802,6 +811,14 @@ function WellnessContent({ breakdown, healthStatus, score }) {
                         <p style={{ color: '#fcd34d', fontSize: '0.75rem' }}>{item.actionIfLow}</p>
                       </div>
                     )}
+                    <div
+                      className="absolute left-1/2 top-full h-3 w-3 -translate-x-1/2 -translate-y-1/2 rotate-45"
+                      style={{
+                        background: 'rgba(0, 0, 0, 0.88)',
+                        borderRight: '1px solid rgba(255, 255, 255, 0.2)',
+                        borderBottom: '1px solid rgba(255, 255, 255, 0.2)',
+                      }}
+                    />
                   </div>
                 </span>
               </div>

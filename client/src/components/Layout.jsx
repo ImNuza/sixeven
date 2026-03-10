@@ -125,6 +125,13 @@ export default function Layout() {
     })
   }
 
+  function handleFloatingKeyDown(event) {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault()
+      toggleChat()
+    }
+  }
+
   return (
     <div className="app-shell">
       <Sidebar />
@@ -145,6 +152,7 @@ export default function Layout() {
         <button
           ref={buttonRef}
           onPointerDown={handleFloatingPointerDown}
+          onKeyDown={handleFloatingKeyDown}
           className="fixed bottom-6 right-6 z-[150] flex items-center gap-2 px-4 py-2.5 rounded-full text-sm font-semibold text-white transition-all hover:scale-105 active:scale-95"
           style={{
             ...(dragState
@@ -161,6 +169,7 @@ export default function Layout() {
             boxShadow: '0 4px 20px color-mix(in srgb, var(--app-accent) 40%, transparent)',
             cursor: dragState ? 'grabbing' : 'grab',
           }}
+          aria-label="Open WealthAI chat"
           title="Drag to move WealthAI"
         >
           <Sparkles className="h-4 w-4" />
