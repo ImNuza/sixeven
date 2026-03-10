@@ -168,20 +168,51 @@ function applyTransferTo(assets, scenario, value) {
 
 export default function ScenarioSimulator({ assets, userProfile }) {
   const [expanded, setExpanded] = useState(true)
-  const [activeScenario, setActiveScenario] = useState(SCENARIOS[0])
-  const [sliderValue, setSliderValue] = useState(SCENARIOS[0].defaultValue)
+  const [activeScenarioId, setActiveScenarioId] = useState(SCENARIOS[0]?.id)
+  const [showFactors, setShowFactors] = useState(false)
+
+  // Build default params from scenario definition
+  const activeScenario = useMemo(
+    () => SCENARIOS.find(s => s.id === activeScenarioId) || SCENARIOS[0],
+    [activeScenarioId],
+  )
+
+  const [currentParams, setCurrentParams] = useState(() => {
+    const defaults = {}
+    for (const p of (SCENARIOS[0]?.params || [])) {
+      defaults[p.key] = p.default
+    }
+    return defaults
+  })
+
+  function handleScenarioChange(id) {
+    setActiveScenarioId(id)
+    const scenario = SCENARIOS.find(s => s.id === id) || SCENARIOS[0]
+    const defaults = {}
+    for (const p of (scenario?.params || [])) {
+      defaults[p.key] = p.default
+    }
+    setCurrentParams(defaults)
+  }
+
+  function updateParam(key, value) {
+    setCurrentParams(prev => ({ ...prev, [key]: value }))
+  }
 
   const currentScore = useMemo(() => calculateWellnessScore(assets, { userProfile }), [assets, userProfile])
   const currentStatus = useMemo(() => getWellnessStatus(currentScore.score), [currentScore.score])
 
-  const projectedAssets = useMemo(() => {
-    let modified = applyScenario(assets, activeScenario, sliderValue)
-    modified = applyTransferTo(modified, activeScenario, sliderValue)
-    return modified
-  }, [assets, activeScenario, sliderValue])
+  // Run the projection engine
+  const projection = useMemo(
+    () => projectScenario(assets, activeScenarioId, currentParams),
+    [assets, activeScenarioId, currentParams],
+  )
 
-  const projectedScore = useMemo(() => calculateWellnessScore(projectedAssets, { userProfile }), [projectedAssets, userProfile])
-  const projectedStatus = useMemo(() => getWellnessStatus(projectedScore.score), [projectedScore.score])
+  const finalPoint = projection.length > 0 ? projection[projection.length - 1] : null
+  const projectedStatus = useMemo(
+    () => getWellnessStatus(finalPoint?.wellnessScore ?? currentScore.score),
+    [finalPoint, currentScore.score],
+  )
 
   const scoreDelta = finalPoint ? finalPoint.wellnessScore - currentScore.score : 0
   const totalCurrent = assets.reduce((s, a) => s + a.value, 0)
@@ -199,31 +230,11 @@ export default function ScenarioSimulator({ assets, userProfile }) {
     [assets, activeScenarioId, currentParams, projection],
   )
 
-  // Factor breakdown for detail view
-  const projectedBreakdown = useMemo(() => {
-    if (!finalPoint) return null
-    // We need the full breakdown — recalculate for the projected state
-    // Use the assets from the final projection by rebuilding them
-    // For simplicity, just use the initial projected score comparison
-    return null // We'll use current breakdown + delta approach
-  }, [finalPoint])
-
   // Chart data
   const chartData = useMemo(() => {
     if (projection.length < 2) return []
-    return projection.map(p => ({
-      ...p,
-      // Keep netWorth as-is for right axis
-    }))
+    return projection.map(p => ({ ...p }))
   }, [projection])
-
-  // For factor impact, compute projected score with a simple approach
-  const projectedFullScore = useMemo(() => {
-    if (!assets.length || !projection.length) return null
-    // Run the full calculation on the final projected net worth
-    // We approximate by applying the scenario to current assets and scoring
-    return null // Factor detail will just show the delta
-  }, [assets, projection])
 
   return (
     <div className="glass-card overflow-hidden">
@@ -290,12 +301,23 @@ export default function ScenarioSimulator({ assets, userProfile }) {
           <div className="p-4 rounded-xl border border-white/[0.06] bg-white/[0.02] space-y-4">
             {activeScenario.params.map(param => (
               param.type === 'select' ? (
-                <ParamSelect
-                  key={param.key}
-                  param={param}
-                  value={currentParams[param.key] ?? param.default}
-                  onChange={(v) => updateParam(param.key, v)}
-                />
+                <div key={param.key}>
+                  <p className="text-xs text-white/50 mb-1.5">{param.label}</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {param.options.map(opt => (
+                      <button
+                        key={opt}
+                        type="button"
+                        onClick={() => updateParam(param.key, opt)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                          (currentParams[param.key] ?? param.default) === opt
+                            ? 'bg-purple-500/20 text-purple-300 border border-purple-400/30'
+                            : 'bg-white/[0.04] text-white/50 border border-white/[0.06] hover:border-white/[0.12]'
+                        }`}
+                      >{opt}</button>
+                    ))}
+                  </div>
+                </div>
               ) : (
                 <ParamSlider
                   key={param.key}

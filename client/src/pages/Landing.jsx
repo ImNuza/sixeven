@@ -990,6 +990,9 @@ function CursorScheduler() {
   const cellRefs = useRef({})
   const [cursorTransform, setCursorTransform] = useState('translate(20px, 20px)')
 
+  const activeStep = SCHED_STEPS[stepIdx]
+  const saveActive = phase === 4
+
   useEffect(() => {
     const durations = [600, 900, 500, 700, 900, 1200]
     const t = setTimeout(() => setPhase(p => (p + 1) % 6), durations[phase])
@@ -1027,9 +1030,6 @@ function CursorScheduler() {
 
     setCursorToTarget(saveButtonRef.current)
   }, [activeStep, phase])
-
-  const activeStep = SCHED_STEPS[stepIdx]
-  const saveActive = phase === 4
 
   return (
     <div
