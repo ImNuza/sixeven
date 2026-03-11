@@ -11,6 +11,7 @@ Key features include:
 4. Scenario Simulation: Model "what-if" scenarios for retirement, market changes, or life events.
 5. Secure Integration: OAuth-based connections to financial institutions, encrypte data storage, and compliance with financial regulations.
 
+Deployed site: https://sixeven.vercel.app/
 ## Tech Stack
 
 - **Client:** React 19, Vite, TailwindCSS, Recharts
